@@ -1,0 +1,23 @@
+# Assignment brief from the employer; kept local, not published
+take-home-assignment.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Model weights (downloaded at build time)
+*.onnx
+models/
+
+# Run outputs
+results/raw/
+*.log
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
