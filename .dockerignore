@@ -1,0 +1,13 @@
+# Send only what the image needs to the build.
+*
+!requirements.txt
+!pyproject.toml
+!common/
+!scripts/
+!tests/
+!cloud/
+!workers/
+!robot/
+!bench/
+!docs/
+**/__pycache__

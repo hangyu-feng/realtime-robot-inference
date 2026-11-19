@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pipx install uv
+      - name: Lint, types, unit tests, requirements drift
+        run: make check
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker compose build
+      - name: Tests inside the image
+        run: docker compose run --rm system pytest -q
+      - name: Limits as read inside the container
+        run: docker compose run --rm system python -m common.cgroup

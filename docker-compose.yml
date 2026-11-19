@@ -1,0 +1,13 @@
+# The whole system runs in this one container, limited to 2 CPUs and 4 GB.
+services:
+  system:
+    build: .
+    image: realtime-robot-inference:dev
+    init: true
+    cpus: 2.0
+    mem_limit: 4g
+    memswap_limit: 4g # equal to mem_limit, so no swap
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./results:/app/results
