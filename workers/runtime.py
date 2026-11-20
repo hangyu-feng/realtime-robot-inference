@@ -20,10 +20,9 @@ from onnxruntime.capi import onnxruntime_pybind11_state as ort_state
 
 from common.clock import Clock
 from common.commands import Command
+from common.protocol import FRAME_HEIGHT_PX, FRAME_WIDTH_PX
 from workers.models import ModelSpec
 
-FRAME_WIDTH_PX = 640
-FRAME_HEIGHT_PX = 480
 OPENCV_THREAD_COUNT = 1
 
 # A JPEG is the start-of-image marker and then segments. A segment is a marker

@@ -47,7 +47,7 @@ max-statements = 50
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["bench", "common", "robot", "scripts", "tests", "workers"]
+files = ["bench", "cloud", "common", "robot", "scripts", "tests", "workers"]
 
 [[tool.mypy.overrides]]
 # onnxruntime ships no type information (no py.typed marker).

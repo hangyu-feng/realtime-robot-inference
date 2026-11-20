@@ -11,8 +11,7 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
+from common.protocol import FRAME_HEIGHT_PX, FRAME_WIDTH_PX
 
 DEFAULT_FRAME_COUNT = 32
 DEFAULT_JPEG_QUALITY = 80
@@ -96,7 +95,7 @@ def build_frame_set(count: int, seed: int, jpeg_quality: int) -> FrameSet:
 def _render_frames(count: int, rng: np.random.Generator) -> Iterator[npt.NDArray[np.uint8]]:
     """Yield the BGR frames of one scene: a static background, moving objects, sensor noise."""
     background = _render_background(rng)
-    frame_size_px = np.array((FRAME_WIDTH, FRAME_HEIGHT))
+    frame_size_px = np.array((FRAME_WIDTH_PX, FRAME_HEIGHT_PX))
     # Orbit centers in the middle half of the frame, with orbit radii of at most a
     # quarter of it, keep the center of every object in view in every frame.
     orbit_centers_px = rng.uniform(
@@ -130,7 +129,8 @@ def _render_frames(count: int, rng: np.random.Generator) -> Iterator[npt.NDArray
 def _render_background(rng: np.random.Generator) -> npt.NDArray[np.uint8]:
     """Render the static part of the scene: a wall above a floor, both with surface texture."""
     cycles_per_px = np.hypot(
-        np.fft.rfftfreq(FRAME_WIDTH)[np.newaxis, :], np.fft.fftfreq(FRAME_HEIGHT)[:, np.newaxis]
+        np.fft.rfftfreq(FRAME_WIDTH_PX)[np.newaxis, :],
+        np.fft.fftfreq(FRAME_HEIGHT_PX)[:, np.newaxis],
     )
     # A power-law amplitude spectrum puts detail at every scale, like the surfaces
     # a camera sees. A steeper exponent moves detail to coarser scales and shrinks
@@ -142,8 +142,8 @@ def _render_background(rng: np.random.Generator) -> npt.NDArray[np.uint8]:
     amplitude = np.zeros_like(cycles_per_px)
     amplitude[kept] = cycles_per_px[kept] ** -_TEXTURE_SPECTRUM_EXPONENT
     white_spectrum = rng.standard_normal(kept.shape) + 1j * rng.standard_normal(kept.shape)
-    texture = np.fft.irfft2(amplitude * white_spectrum, s=(FRAME_HEIGHT, FRAME_WIDTH))
+    texture = np.fft.irfft2(amplitude * white_spectrum, s=(FRAME_HEIGHT_PX, FRAME_WIDTH_PX))
     texture *= _TEXTURE_SIGMA_LEVELS / texture.std()
-    rows = np.arange(FRAME_HEIGHT)[:, np.newaxis, np.newaxis]
+    rows = np.arange(FRAME_HEIGHT_PX)[:, np.newaxis, np.newaxis]
     base = np.where(rows < _HORIZON_ROW_PX, _WALL_COLOUR_BGR, _FLOOR_COLOUR_BGR)
     return np.clip(np.rint(base + texture[:, :, np.newaxis]), 0, 255).astype(np.uint8)

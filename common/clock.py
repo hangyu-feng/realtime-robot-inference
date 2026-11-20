@@ -1,8 +1,9 @@
-"""The injectable clock that pure-logic modules read time from.
+"""The injectable source of monotonic time.
 
-Scheduling, queueing, protocol and robot-control logic take a Clock and never
-read the operating system's clock themselves, so tests and the simulated-clock
-capacity model move time by hand.
+The I/O layers read a Clock once per event and pass the reading as now_ns to the
+scheduling, queueing, protocol and robot-control logic, which never reads the
+operating system's clock itself, so tests and the simulated-clock capacity model
+move time by hand.
 """
 
 from __future__ import annotations

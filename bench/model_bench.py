@@ -29,7 +29,6 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
-from fractions import Fraction
 from functools import partial
 from pathlib import Path
 from statistics import fmean
@@ -40,6 +39,7 @@ from numpy.typing import NDArray
 
 from bench.environment import collect_environment
 from bench.stats import summarize
+from cloud.scheduler import pacing_release_ns
 from common.cgroup import read_stats
 from common.clock import Clock, MonotonicClock
 from common.commands import Command
@@ -84,17 +84,6 @@ _NS_PER_S = 1_000_000_000
 
 # Each decode size by its name in the report, as the half_size argument of decode_jpeg.
 _DECODE_SIZES = {"full": False, "half": True}
-
-
-def paced_start_ns(start_ns: int, cpu_ns: int, share_cores: float) -> int:
-    """Return the earliest start of the next batch, after one that began at start_ns.
-
-    The batch used cpu_ns of CPU time. From its start to the returned time, CPU
-    time over wall time is at or under the share.
-    """
-    # Whole nanoseconds from exact arithmetic. A float quotient can round down,
-    # which would start the next batch early and leave the duty over the share.
-    return start_ns + math.ceil(cpu_ns / Fraction(share_cores))
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,7 +339,7 @@ def _wait_for_share(
 ) -> int:
     """Sleep until the share lets the next batch start, and return the time slept."""
     wait_start_ns = clock.now_ns()
-    release_ns = paced_start_ns(start_ns, cpu_ns, share_cores)
+    release_ns = pacing_release_ns(start_ns, cpu_ns, share_cores)
     if release_ns <= wait_start_ns:
         return 0
     # A signal does not cut time.sleep short (PEP 475), so a stop waits for the
@@ -372,7 +361,7 @@ def run_load(
 ) -> LoadResults:
     """Run batches until the duration is over or a stop is requested.
 
-    With a share, each batch after the first starts no earlier than paced_start_ns
+    With a share, each batch after the first starts no earlier than pacing_release_ns
     allows. A real run passes time.process_time_ns and time.sleep.
     """
     samples = _Samples(clock, process_time_ns)

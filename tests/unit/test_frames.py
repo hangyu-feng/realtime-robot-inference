@@ -7,19 +7,18 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
+from common.protocol import FRAME_HEIGHT_PX, FRAME_WIDTH_PX
 from robot.frames import (
     DEFAULT_FRAME_COUNT,
     DEFAULT_JPEG_QUALITY,
     DEFAULT_SEED,
-    FRAME_HEIGHT,
-    FRAME_WIDTH,
     FrameEncodeError,
     FrameSet,
     FrameSetStats,
     build_frame_set,
 )
 
-FRAME_SHAPE = (FRAME_HEIGHT, FRAME_WIDTH, 3)
+FRAME_SHAPE = (FRAME_HEIGHT_PX, FRAME_WIDTH_PX, 3)
 
 # imdecode accepts every image format OpenCV knows, so decoding alone does not
 # show that a frame is a JPEG. These markers open and close a JPEG stream.

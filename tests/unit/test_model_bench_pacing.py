@@ -8,8 +8,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from bench.model_bench import LoadResults, StopRequest, paced_start_ns, run_load
+from bench.model_bench import LoadResults, StopRequest, run_load
 from bench.stats import summarize
+from cloud.scheduler import pacing_release_ns
 from common.clock import FakeClock
 
 NS_PER_S = 1_000_000_000
@@ -97,7 +98,7 @@ def cycle_starts(start_ns: int, batches: list[tuple[int, int]], share_cores: flo
     """Return the start of every batch, and the end of the cycle of the last one."""
     starts = [start_ns]
     for cpu_ns, delay_ns in batches:
-        starts.append(paced_start_ns(starts[-1], cpu_ns, share_cores) + delay_ns)
+        starts.append(pacing_release_ns(starts[-1], cpu_ns, share_cores) + delay_ns)
     return starts
 
 
@@ -109,7 +110,7 @@ def earliest_starts(batches: Sequence[tuple[int, int]], share_cores: float) -> l
     """
     starts = [LOAD_START_NS]
     for wall_ns, cpu_ns in batches:
-        starts.append(max(starts[-1] + wall_ns, paced_start_ns(starts[-1], cpu_ns, share_cores)))
+        starts.append(max(starts[-1] + wall_ns, pacing_release_ns(starts[-1], cpu_ns, share_cores)))
     return starts
 
 
@@ -129,14 +130,14 @@ def earliest_starts(batches: Sequence[tuple[int, int]], share_cores: float) -> l
 def test_next_batch_starts_the_cpu_time_over_the_share_after_the_last(
     start_ns: int, cpu_ns: int, share_cores: float, expected_ns: int
 ) -> None:
-    assert paced_start_ns(start_ns, cpu_ns, share_cores) == expected_ns
+    assert pacing_release_ns(start_ns, cpu_ns, share_cores) == expected_ns
 
 
 @given(start_ns=START_NS, cpu_ns=CPU_NS, share_cores=SHARE_CORES)
 def test_paced_start_is_the_earliest_that_keeps_the_cycle_within_the_share(
     start_ns: int, cpu_ns: int, share_cores: float
 ) -> None:
-    release_ns = paced_start_ns(start_ns, cpu_ns, share_cores)
+    release_ns = pacing_release_ns(start_ns, cpu_ns, share_cores)
 
     share = Fraction(share_cores)
     assert cpu_ns <= share * (release_ns - start_ns)
