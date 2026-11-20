@@ -8,7 +8,7 @@ Python 3.14, checked by `ruff`, `mypy --strict` and `pytest`. These rules cover 
 
 ### Structure
 
-- ALWAYS keep scheduling, queueing, protocol and robot-control logic free of I/O: no sockets, no `asyncio`, no real clock. Pass time in through a clock object.
+- ALWAYS keep scheduling, queueing, protocol and robot-control logic free of I/O: no sockets, no `asyncio`, no real clock. Pass time in as a value: the I/O layer reads its clock once per event and passes the reading (`now_ns`).
 - ALWAYS keep the I/O layers thin. They move bytes, call the logic and record metrics.
 - PREFER one job per module and per function. Reconsider a function that passes about 40 lines or takes a flag that switches its behaviour.
 - ALWAYS validate untrusted input once, at the boundary where it enters, and trust the types after that.
@@ -53,7 +53,7 @@ Python 3.14, checked by `ruff`, `mypy --strict` and `pytest`. These rules cover 
 
 ### Tests
 
-- ALWAYS test logic directly, with a fake clock and no event loop. NEVER sleep in a test.
+- ALWAYS test logic directly, with time given as values or a fake clock, and no event loop. NEVER sleep in a test.
 - PREFER property tests for invariants (conservation, fairness, ordering) and `pytest.mark.parametrize` for repeated cases. NEVER branch inside a test.
 - ALWAYS name a test after the behaviour it checks, and assert at the public boundary of the unit.
 - PREFER fakes with real behaviour over mocks.
