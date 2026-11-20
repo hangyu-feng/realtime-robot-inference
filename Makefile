@@ -15,8 +15,9 @@ lint:
 types:
 	$(UV) run mypy
 
+# Tests that need the model files skip outside the image.
 test:
-	$(UV) run pytest -q tests/unit
+	$(UV) run pytest -q
 
 fmt:
 	$(UV) run ruff format .

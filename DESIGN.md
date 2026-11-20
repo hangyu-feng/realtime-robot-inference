@@ -94,7 +94,7 @@ The path of one frame, with the latency stage each step produces (section 7 defi
 ### 1.4 Bounds and failure handling
 
 - **Bounded everywhere.** One slot per robot. A small bounded downlink queue per connection that drops the oldest command. A maximum message size. A connection cap. Handshake and idle timeouts. Fixed-size histograms. Per-robot metric entries are capped and expire, so reconnect churn cannot grow memory.
-- **Input validation.** Bad header, wrong protocol version, unknown model, zero-byte, truncated or corrupt JPEG, wrong resolution. One bad frame fails alone: frames are decoded one by one, so it cannot fail its batch or crash a worker.
+- **Input validation.** Bad header, wrong protocol version, unknown model, zero-byte, truncated or corrupt JPEG, wrong resolution. One bad frame fails alone: frames are decoded one by one, so it cannot fail its batch or crash a worker. The image size declared in the JPEG header is checked before decoding, so a frame cannot make a worker allocate more than one frame's worth of pixels.
 - **Fault isolation.** Each connection's task has its own exception boundary. Workers are supervised: a crashed worker is restarted and its in-flight batch is dropped, not retried. Inference has a timeout. If one model is down, the other keeps serving.
 - **Slow consumer.** A robot that stops reading cannot grow the server's write buffer. Past a time limit it is disconnected.
 - **Half-open connections.** A peer that vanishes without closing is found by the idle timeout. The frame stream is the heartbeat.
@@ -202,7 +202,7 @@ Each record states the context, the options, the decision, the consequence, and 
   - TLS ends at the load balancer. Inside the container the connection is plain `ws`. TLS cost is not measured.
   - The handshake carries a protocol version and an auth token. An unknown version is rejected. The token is checked against an optional shared token, off by default. Real authentication is not built.
   - The frame protocol (`common/protocol.py`) does not depend on the transport. WebSocket sits behind a small adapter, and tests use an in-memory adapter. A QUIC adapter is the migration path for lossy links. It is not built.
-- **Consequence.** TCP delivers in order. On a lossy link one lost segment delays every frame behind it (head-of-line blocking). Late frames still cost little compute, because each one overwrites the slot on arrival and only the newest is decoded, but they arrive late. This is a weakness on production networks. It is not a bottleneck at 50 robots on loopback, where nothing is lost. To keep TCP from hiding a queue, socket buffers are sized to about two frames, the robot sets `TCP_NOTSENT_LOWAT`, and the robot skips a frame when the previous one is still unsent.
+- **Consequence.** TCP delivers in order. On a lossy link one lost segment delays every frame behind it (head-of-line blocking). Late frames still cost little compute, because each one overwrites the slot on arrival and only the newest is decoded, but they arrive late. This is a weakness on production networks. It is not a bottleneck at 50 robots on loopback, where nothing is lost. To keep TCP from hiding a queue, socket buffers are sized so that a stalled path holds about two frames, and the robot skips a frame when the previous one is still unsent. The robot also sets `TCP_NOTSENT_LOWAT`, but on loopback one segment can carry a whole frame past it, so the buffer sizes are what bound the path.
 - **At 50 robots.** The cost is bytes: `{{massive.bytes_in_per_s}}` bytes per second into the gateway, and an uplink stage of `{{massive.stage.transport_up_ms.p99}}` ms at p99.
 
 Wire protocol, version 1:
@@ -238,7 +238,7 @@ Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error, 1008 policy
 
 - **Context.** Two ONNX models, CPU only, under a quota. Inside a container limited by quota, the host's core count is still visible, and ONNX Runtime sizes its thread pool from it by default.
 - **Options.** (a) One session per worker, one intra-op thread each. (b) One executor with 2 threads running both models' batches in turn. (c) As (a), with a second depth thread when the classifier leaves CPU idle. (d) ONNX Runtime's default thread count.
-- **Decision.** (a) as the baseline. Thread counts are always set explicitly, for ONNX Runtime and OpenCV, and thread spinning is off, because spinning burns quota. (c) is the first optimization candidate. (d) is run once as a control.
+- **Decision.** (a) as the baseline. Thread counts are always set explicitly, for ONNX Runtime and OpenCV, and thread spinning is off, because spinning burns quota. The image sets `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1`, because importing numpy otherwise starts an OpenBLAS pool with one thread per visible host core, and since no code here calls a BLAS routine, those threads would only compete for the quota. (c) is the first optimization candidate. (d) is run once as a control.
 - **Consequence.** The slow model cannot delay the fast one. With few robots the classifier is expected to leave part of its core idle while depth drops frames, which is what (c) addresses. The published MiDaS file has a batch dimension fixed at 1 and normalizes its input inside the graph. It is served as published when depth's batch cap is 1. A copy patched to a dynamic batch dimension is used when the cap is larger, and in the batch-cap comparison. MobileNetV3 is preprocessed outside the graph: resize the shorter side to 256, center crop to 224, normalize with the ImageNet mean and standard deviation.
 - **At 50 robots.** Both workers are saturated, and the limit is the quota. Section 6.4 budgets it.
 
@@ -267,8 +267,8 @@ Places where a queue could hide, and what closes each one:
 |---|---|---|
 | WebSocket library receive queue | Frames wait behind a slow reader. | The reader only overwrites the slot, so it always drains. |
 | asyncio write buffer | Grows without bound if unchecked. | Bounded downlink queue per connection; slow consumers are disconnected. |
-| Kernel socket buffers | Loopback buffers auto-tune to many frames. | Small `SO_RCVBUF` and `SO_SNDBUF`, about two frames. |
-| Robot send path | The kernel accepts frames it cannot send yet. | `TCP_NOTSENT_LOWAT`; the robot skips a frame while the previous one is unsent. |
+| Kernel socket buffers | Loopback buffers auto-tune to many frames. | Small `SO_RCVBUF` and `SO_SNDBUF`, sized so that a path whose reader has stopped holds about two frames. Linux doubles the size requested. The transport benchmark reports what a stalled path holds. |
+| Robot send path | The kernel accepts frames it cannot send yet. | The robot skips a frame while the previous one is unsent, and a send is complete only when the kernel holds the whole frame. `TCP_NOTSENT_LOWAT` is set too, but a loopback segment can carry a whole frame past it. |
 | Gateway to worker | A pushed batch waits at a busy worker. | Workers pull. At most one batch per worker is in flight. |
 
 ### 5.2 Freshness thresholds
@@ -458,7 +458,7 @@ Stages are consecutive intervals on one clock, so they add up to the end-to-end 
 | `decode_ms` | | | worker, per frame | JPEG decode |
 | `preprocess_ms` | | | worker, per frame | preprocessing |
 | `batch_peers_ms` | | | worker: time spent on the other frames of the same batch | batch wait |
-| `inference_ms` | | | worker: the model run for the batch | inference |
+| `inference_ms` | | | worker: assembling the batch tensor and the model run, for the batch | inference |
 | `postprocess_ms` | | | worker, per frame | postprocessing |
 | `deliver_ms` | gateway has the results | robot has the command | robot | result delivery |
 
@@ -771,7 +771,7 @@ One histogram (type H) per stage, per model. Section 7 defines the stages. `fire
 | `decode_ms` | JPEG decode of this frame |
 | `preprocess_ms` | Resize, colour conversion, normalization, layout |
 | `batch_peers_ms` | Worker time spent on the other frames of the same batch |
-| `inference_ms` | Model run for the batch |
+| `inference_ms` | Assembling the batch tensor and the model run, for the batch |
 | `postprocess_ms` | Output to command |
 
 ### 10.7 Connections, workers, cgroup, processes, loop
@@ -806,7 +806,7 @@ One histogram (type H) per stage, per model. Section 7 defines the stages. `fire
 | `timeouts` | int | counter | Inference timeouts |
 | `errors` | object, kind to int | counter | Kinds: `decode`, `inference` |
 
-`cgroup`, read from the container's own cgroup files (v2, with a v1 fallback):
+`cgroup`, read from the container's own cgroup files (v2, with a v1 fallback). A value the kernel does not expose is null: cgroup v1 has no socket-memory counter, `memory.peak` needs Linux 5.19 or later, and a cgroup without the cpu or memory controller has none of that controller's counters.
 
 | Field | Type | Kind | Meaning |
 |---|---|---|---|
@@ -906,7 +906,7 @@ Every scenario takes a topology (`single` or `split`), a phase mode (random by d
 | File | Committed | Content |
 |---|---|---|
 | `config.json` | yes | Scenario, run id, repeat index, topology, seed. Robots: count, frame rate, phase mode, subscribed models, stale thresholds, watchdog limits, link model (delay and jitter per direction). The full server config. The planned event times. |
-| `env.json` | yes | CPU model and visible CPU count, kernel, container engine and version, cgroup version, the limits as read inside the container. Python and package versions. Model file hashes. Frame set: count, JPEG quality, smallest, mean and largest size in bytes. Git commit, dirty flag, image digest. Start time in UTC. |
+| `env.json` | yes | CPU model and visible CPU count, machine architecture, kernel, container engine and version, cgroup version, the limits as read inside the container. Python and package versions. Model file hashes. Frame set: count, JPEG quality, smallest, mean and largest size in bytes. Git commit, dirty flag, image digest. Start time in UTC. |
 | `gate.json` | yes | `tests_passed` (with the commit and the counts), `image_built` (with the digest), `limits_ok` (expected and read values), and `gated`, which is true only when all three are. |
 | `scrapes.jsonl` | yes | One line per second: time since run start, the full `/metrics` object, and a `fleet` object with the `processes` fields for the robot fleet and, in the `split` topology, the `cgroup` fields of the robots' container. |
 | `events.jsonl` | yes | One line per event with its time since run start: `server_ready`, `robot_start`, `robot_join`, `robot_kill`, `robot_stop`, `fault`, `scenario_end`. |
@@ -1010,6 +1010,8 @@ Each optimization or control is a candidate with a stated hypothesis, one main m
 - **Co-located simulator.** In the `single` topology the simulator competes with the system under test. Fire lag flags runs where the simulator fell behind, and the `split` topology shows the difference.
 - **Shared clock.** The latency breakdown relies on all processes sharing one monotonic clock. Across machines only robot-clock freshness and server dwell time are valid.
 - **Server-side percentiles** come from log-bucket histograms with about 9% resolution. Exact percentiles come from robot-side samples.
+- **Per-process memory.** `processes.<p>.rss_bytes` is the kernel's approximate per-process counter from `/proc/<pid>/stat`. The leak check uses the cgroup's anonymous plus socket memory instead.
+- **Damaged frames.** A frame whose image data is damaged but still decodes is served, and its command is computed from the pixels the decoder recovered. For such a frame the JPEG decoder writes one line to the worker's standard error, which cannot be switched off through OpenCV, so the container's log size is capped.
 - **Scale beyond one container.** Section 14 is design reasoning, not measurement.
 - **GPU.** Not used and not measured.
 

@@ -11,3 +11,9 @@ services:
       - "8080:8080"
     volumes:
       - ./results:/app/results
+    # The JPEG decoder writes one line per damaged frame to standard error.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

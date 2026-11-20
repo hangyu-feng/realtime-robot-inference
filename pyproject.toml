@@ -47,7 +47,12 @@ max-statements = 50
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["common", "scripts", "tests"]
+files = ["bench", "common", "robot", "scripts", "tests", "workers"]
+
+[[tool.mypy.overrides]]
+# onnxruntime ships no type information (no py.typed marker).
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

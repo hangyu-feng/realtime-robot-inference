@@ -14,7 +14,7 @@ venv/
 
 # Model weights (downloaded at build time)
 *.onnx
-models/
+/models/
 
 # Run outputs
 results/raw/
