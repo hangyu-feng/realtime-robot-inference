@@ -1,19 +1,33 @@
 # The whole system runs in this one container, limited to 2 CPUs and 4 GB.
 services:
+  # ASSUMPTION: A1. The robots run in this container too, started with
+  # `docker compose exec system python -m robot.fleet ...`.
   system:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: realtime-robot-inference:dev
     init: true
     cpus: 2.0
     mem_limit: 4g
     memswap_limit: 4g # equal to mem_limit, so no swap
+    environment:
+      RRI_TOPOLOGY: single
+      # A JSON object of settings merged over the defaults; empty for none.
+      RRI_OVERRIDES: ${RRI_OVERRIDES:-}
     ports:
       - "8080:8080"
     volumes:
       - ./results:/app/results
+    # The gateway shuts down within shutdown_grace_ms + 2 * worker_stop_timeout_ms
+    # + close_timeout_ms, which is 7 s with the default settings.
+    stop_grace_period: 10s
     # The JPEG decoder writes one line per damaged frame to standard error.
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    # No healthcheck: a probe process inside the container would be charged to
+    # the CPU quota being measured. Readiness is the "ready:" line and /healthz.

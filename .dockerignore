@@ -2,6 +2,7 @@
 *
 !requirements.txt
 !pyproject.toml
+!DESIGN.md
 !common/
 !scripts/
 !tests/

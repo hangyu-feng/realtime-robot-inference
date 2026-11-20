@@ -22,8 +22,9 @@ class ModelCounters:
     two conservation identities over these counters are stated in cloud/mailbox.py and
     cloud/downlink.py. The gauge frames_pending is not a field: it is Mailbox.pending_count.
 
-    max_service_gap_ns holds closed gaps only, because it moves when a command is popped from
-    the downlink queue. /metrics reports max_service_gap_ms as
+    max_service_gap_ns holds closed gaps only: a command popped from the downlink queue closes
+    the gap before it, and a disconnect closes the session's last interval, so a reconnect
+    keeps every gap of the robot's earlier sessions. /metrics reports max_service_gap_ms as
     max(max_service_gap_ns, end_ns - last_command_ns) when last_command_ns is set, where end_ns
     is the scrape time while the robot is connected and disconnected_ns afterwards, so a robot
     that is starved now, or never got a command, shows it.
@@ -179,6 +180,14 @@ class RobotRegistry:
         if not record.connected:
             raise ValueError(f"robot {robot_id!r} is not connected")
         record.disconnected_ns = now_ns
+        # The disconnect ends the session's last interval without a command (DESIGN.md 10.3).
+        # A reconnect starts the interval again at its own start, so the gap is closed here or
+        # lost.
+        for counters in record.models.values():
+            if counters.last_command_ns is not None:
+                counters.max_service_gap_ns = max(
+                    counters.max_service_gap_ns, now_ns - counters.last_command_ns
+                )
 
     def get(self, robot_id: str) -> RobotRecord:
         return self._records[robot_id]

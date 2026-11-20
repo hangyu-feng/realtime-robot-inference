@@ -171,7 +171,8 @@ def test_a_reconnect_keeps_counters_and_fairness_memory_and_clears_session_field
             last_served_seq=3,
             last_served_ns=20,
             last_command_ns=60,
-            max_service_gap_ns=9,
+            # The disconnect at 50 closed the interval since the command at 30.
+            max_service_gap_ns=20,
         ),
         "depth": ModelCounters(last_command_ns=60),
     }
@@ -203,6 +204,26 @@ def test_a_reconnect_starts_the_service_gap_only_for_the_models_it_subscribes_to
 
     last_command_ns = {model: counters.last_command_ns for model, counters in record.models.items()}
     assert last_command_ns == {"cls": 50, "depth": None}
+
+
+def test_a_disconnect_closes_each_open_service_gap_and_a_reconnect_keeps_it() -> None:
+    registry = RobotRegistry(RETENTION_NS, MAX_ENTRIES)
+    record = connect(registry, "a", 0, BOTH)
+    record.models["cls"].last_command_ns = 30
+    record.models["cls"].max_service_gap_ns = 9
+
+    registry.disconnect("a", 50)
+    at_the_disconnect = {
+        model: counters.max_service_gap_ns for model, counters in record.models.items()
+    }
+    connect(registry, "a", 60, ("cls",))
+
+    # cls was last served at 30; depth never, so its interval runs from the session's start.
+    assert at_the_disconnect == {"cls": 20, "depth": 50}
+    assert {model: counters.max_service_gap_ns for model, counters in record.models.items()} == {
+        "cls": 20,
+        "depth": 50,
+    }
 
 
 def test_disconnect_ends_the_session_and_keeps_what_the_io_layer_set() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import fields, replace
 from typing import Any
 
@@ -121,10 +122,42 @@ def test_model_config_refuses_a_bad_value_naming_the_field(
             {"stale_ms": LONGEST_MS, "watchdog_ms": LONGEST_MS, "fake_frame_ms": LONGEST_MS},
             id="durations-filling-the-clock",
         ),
+        pytest.param({"stale_ms": 1.0, "watchdog_ms": 1.0}, id="thresholds-of-one-millisecond"),
+        pytest.param({"threads": 64}, id="most-threads"),
     ],
 )
 def test_model_config_accepts_a_boundary_value(overrides: dict[str, Any]) -> None:
     replace(CLS, **overrides)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field_name"),
+    [
+        pytest.param({"stale_ms": math.nextafter(1.0, 0.0)}, "stale_ms", id="stale-one-step-below"),
+        pytest.param({"stale_ms": 5e-7}, "stale_ms", id="stale-rounding-to-no-nanoseconds"),
+        pytest.param(
+            {"stale_ms": 1.0, "watchdog_ms": math.nextafter(1.0, 0.0)},
+            "watchdog_ms",
+            id="watchdog-one-step-below",
+        ),
+        pytest.param(
+            {"stale_ms": 1.0, "watchdog_ms": 5e-7},
+            "watchdog_ms",
+            id="watchdog-rounding-to-no-nanoseconds",
+        ),
+    ],
+)
+def test_model_config_refuses_a_threshold_below_one_millisecond(
+    overrides: dict[str, Any], field_name: str
+) -> None:
+    with pytest.raises(ConfigError, match=f"^{field_name} must be at least 1$"):
+        replace(CLS, **overrides)
+
+
+@pytest.mark.parametrize("threads", [65, 2**31])
+def test_model_config_refuses_more_threads_than_the_most_it_may_start(threads: int) -> None:
+    with pytest.raises(ConfigError, match=r"^threads must be at most 64$"):
+        replace(CLS, threads=threads)
 
 
 SERVER_POSITIVE_FIELDS = [
@@ -140,6 +173,11 @@ SERVER_POSITIVE_FIELDS = [
     "slow_consumer_timeout_ms",
     "warmup_timeout_ms",
     "shutdown_grace_ms",
+    "close_timeout_ms",
+    "ping_timeout_ms",
+    "worker_stop_timeout_ms",
+    "worker_restart_min_ms",
+    "worker_restart_max_ms",
     "ping_interval_ms",
     "robot_retention_s",
     "loop_probe_ms",
@@ -155,6 +193,8 @@ SERVER_COUNT_FIELDS = [
     "max_message_bytes",
     "socket_rcvbuf_bytes",
     "socket_sndbuf_bytes",
+    "receive_queue_frames",
+    "calibration_runs",
     "downlink_queue_commands",
     "max_robot_entries",
 ]
@@ -170,10 +210,63 @@ SERVER_DURATIONS = [
     ("slow_consumer_timeout_ms", LONGEST_MS),
     ("warmup_timeout_ms", LONGEST_MS),
     ("shutdown_grace_ms", LONGEST_MS),
+    ("close_timeout_ms", LONGEST_MS),
+    ("ping_timeout_ms", LONGEST_MS),
+    ("worker_stop_timeout_ms", LONGEST_MS),
+    ("worker_restart_min_ms", LONGEST_MS),
+    ("worker_restart_max_ms", LONGEST_MS),
     ("ping_interval_ms", LONGEST_MS),
     ("robot_retention_s", LONGEST_S),
     ("loop_probe_ms", LONGEST_MS),
 ]
+# Each duration at the longest it may be, with the settings that must grow with it: the ping
+# timeout is at least twice the idle timeout, which so fills at most half the clock, and the
+# restart maximum is at least the minimum.
+GROWING_WITH = {
+    "idle_timeout_ms": {"idle_timeout_ms": LONGEST_MS / 2, "ping_timeout_ms": LONGEST_MS},
+    "worker_restart_min_ms": {
+        "worker_restart_min_ms": LONGEST_MS,
+        "worker_restart_max_ms": LONGEST_MS,
+    },
+}
+LONGEST_DURATIONS = [
+    pytest.param(GROWING_WITH.get(name, {name: longest}), id=name)
+    for name, longest in SERVER_DURATIONS
+]
+# Each wait and threshold with the shortest it may be, 1 ms in its unit, and the nanoseconds
+# in that unit.
+SERVER_WAITS = [
+    ("skip_max_unserved_ms", 1.0, 1_000_000),
+    ("ingress_burst_s", 0.001, 1_000_000_000),
+    ("max_frame_age_ms", 1.0, 1_000_000),
+    ("handshake_timeout_ms", 1.0, 1_000_000),
+    ("idle_timeout_ms", 1.0, 1_000_000),
+    ("inference_timeout_ms", 1.0, 1_000_000),
+    ("slow_consumer_timeout_ms", 1.0, 1_000_000),
+    ("warmup_timeout_ms", 1.0, 1_000_000),
+    ("shutdown_grace_ms", 1.0, 1_000_000),
+    ("close_timeout_ms", 1.0, 1_000_000),
+    ("ping_timeout_ms", 1.0, 1_000_000),
+    ("worker_stop_timeout_ms", 1.0, 1_000_000),
+    ("worker_restart_min_ms", 1.0, 1_000_000),
+    ("worker_restart_max_ms", 1.0, 1_000_000),
+    ("ping_interval_ms", 1.0, 1_000_000),
+    ("robot_retention_s", 0.001, 1_000_000_000),
+    ("loop_probe_ms", 1.0, 1_000_000),
+]
+# The settings that must move with a wait at its shortest. A burst of 1 ms still holds one
+# message of each bucket, and the restart minimum is at most the maximum. The ping timeout is
+# at least twice the idle timeout, so the shortest it can be is 2 ms.
+MOVING_WITH = {
+    "ingress_burst_s": {
+        "ingress_max_messages_per_s": 1024.0,
+        "ingress_max_bytes_per_s": float(2**30),
+    },
+    "ping_timeout_ms": {"idle_timeout_ms": 1.0, "ping_timeout_ms": 2.0},
+    "worker_restart_max_ms": {"worker_restart_min_ms": 1.0},
+}
+# The most a whole-number setting may be: the C int that socket options and the runtime take.
+LARGEST_COUNT = 2**31 - 1
 
 
 @pytest.mark.parametrize("field_name", SERVER_POSITIVE_FIELDS)
@@ -217,11 +310,10 @@ def test_server_config_accepts_a_zero_allowance(field_name: str) -> None:
     replace(DEFAULT, **changes)
 
 
-@pytest.mark.parametrize(("field_name", "longest"), SERVER_DURATIONS)
-def test_server_config_accepts_a_duration_that_fills_the_clock(
-    field_name: str, longest: float
+@pytest.mark.parametrize("changes", LONGEST_DURATIONS)
+def test_server_config_accepts_each_duration_at_the_longest_the_clock_and_its_rules_allow(
+    changes: dict[str, Any],
 ) -> None:
-    changes: dict[str, Any] = {field_name: longest}
     replace(DEFAULT, **changes)
 
 
@@ -230,6 +322,40 @@ def test_server_config_refuses_a_duration_beyond_the_clock(field_name: str, long
     changes: dict[str, Any] = {field_name: longest + 1}
     with pytest.raises(ConfigError, match=field_name):
         replace(DEFAULT, **changes)
+
+
+@pytest.mark.parametrize(("field_name", "shortest", "ns_per_unit"), SERVER_WAITS)
+def test_server_config_accepts_each_wait_at_one_millisecond_or_the_shortest_its_rules_allow(
+    field_name: str, shortest: float, ns_per_unit: int
+) -> None:
+    changes: dict[str, Any] = {field_name: shortest, **MOVING_WITH.get(field_name, {})}
+    config = replace(DEFAULT, **changes)
+    assert round(getattr(config, field_name) * ns_per_unit) >= 1_000_000
+
+
+@pytest.mark.parametrize(
+    ("field_name", "shortest"), [(name, shortest) for name, shortest, _ in SERVER_WAITS]
+)
+@pytest.mark.parametrize(
+    "below",
+    [
+        pytest.param(lambda shortest: 0.0, id="zero"),
+        pytest.param(lambda shortest: 5e-7, id="5e-7-of-the-unit"),
+        pytest.param(lambda shortest: math.nextafter(shortest, 0.0), id="one-step-below"),
+    ],
+)
+def test_server_config_refuses_a_wait_below_one_millisecond(
+    field_name: str, shortest: float, below: Callable[[float], float]
+) -> None:
+    changes: dict[str, Any] = {field_name: below(shortest)}
+    with pytest.raises(ConfigError, match=f"^{field_name} must be at least {shortest:g}$"):
+        replace(DEFAULT, **changes)
+
+
+@pytest.mark.parametrize("value", [math.nextafter(0.01, 0.0), 5e-324])
+def test_server_config_refuses_a_minimum_share_below_a_hundredth_of_a_core(value: float) -> None:
+    with pytest.raises(ConfigError, match=r"^pacing_min_share_cores must be at least 0\.01$"):
+        replace(DEFAULT, pacing_min_share_cores=value)
 
 
 @pytest.mark.parametrize(
@@ -267,11 +393,38 @@ def test_server_config_accepts_a_count_of_one(field_name: str) -> None:
     replace(DEFAULT, **changes)
 
 
+@pytest.mark.parametrize("field_name", SERVER_COUNT_FIELDS)
+def test_server_config_refuses_a_count_that_does_not_fit_a_c_int(field_name: str) -> None:
+    changes: dict[str, Any] = {field_name: LARGEST_COUNT + 1}
+    with pytest.raises(ConfigError, match=f"^{field_name} must be from 1 to 2147483647$"):
+        replace(DEFAULT, **changes)
+
+
+# Without max_message_bytes, which the payload of one worker request bounds far lower.
+@pytest.mark.parametrize(
+    "field_name", [name for name in SERVER_COUNT_FIELDS if name != "max_message_bytes"]
+)
+def test_server_config_accepts_a_count_that_fills_a_c_int(field_name: str) -> None:
+    # With a robot table as large, so that it has room for as many connections.
+    changes: dict[str, Any] = {"max_robot_entries": LARGEST_COUNT, field_name: LARGEST_COUNT}
+    replace(DEFAULT, **changes)
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
-        pytest.param({"port": 0}, "port", id="port-zero"),
+        pytest.param({"port": -1}, "port", id="port-negative"),
         pytest.param({"port": 65_536}, "port", id="port-above-range"),
+        pytest.param(
+            {"ping_timeout_ms": math.nextafter(2 * DEFAULT.idle_timeout_ms, 0.0)},
+            "ping_timeout_ms",
+            id="ping-timeout-just-below-twice-idle",
+        ),
+        pytest.param(
+            {"worker_restart_max_ms": math.nextafter(DEFAULT.worker_restart_min_ms, 0.0)},
+            "worker_restart_max_ms",
+            id="restart-maximum-below-minimum",
+        ),
         pytest.param({"worker_nice": -1}, "worker_nice", id="nice-negative"),
         pytest.param({"worker_nice": 20}, "worker_nice", id="nice-above-range"),
         pytest.param({"models": {"cls": CLS}}, "models", id="model-missing"),
@@ -341,10 +494,18 @@ def test_server_config_refuses_an_inconsistent_setting(
 @pytest.mark.parametrize(
     "overrides",
     [
-        pytest.param({"port": 1}, id="lowest-port"),
+        pytest.param({"port": 0}, id="port-chosen-by-the-kernel"),
         pytest.param({"port": 65_535}, id="highest-port"),
+        pytest.param(
+            {"ping_timeout_ms": 2 * DEFAULT.idle_timeout_ms}, id="ping-timeout-twice-idle"
+        ),
+        pytest.param(
+            {"worker_restart_max_ms": DEFAULT.worker_restart_min_ms},
+            id="restart-maximum-equal-to-minimum",
+        ),
         pytest.param({"worker_nice": 0}, id="lowest-nice"),
         pytest.param({"worker_nice": 19}, id="highest-nice"),
+        pytest.param({"pacing_min_share_cores": 0.01}, id="smallest-minimum-share"),
         pytest.param({"queue_policy": QueuePolicy.FIFO, "skip_rule": False}, id="fifo-control"),
         pytest.param({"models": models(depth=replace(DEPTH, paced=False))}, id="no-paced-model"),
         pytest.param({"models": models(cls=replace(CLS, threads=0))}, id="unpaced-default-threads"),
@@ -415,8 +576,15 @@ SERVER_CHANGES: list[tuple[str, Any, str, object]] = [
     ("slow_consumer_timeout_ms", 500.0, "timeouts_ms.slow_consumer", 500.0),
     ("warmup_timeout_ms", 60_000.0, "timeouts_ms.warmup", 60_000.0),
     ("shutdown_grace_ms", 1_000.0, "timeouts_ms.shutdown_grace", 1_000.0),
+    ("close_timeout_ms", 500.0, "timeouts_ms.close", 500.0),
+    ("ping_timeout_ms", 60_000.0, "timeouts_ms.ping", 60_000.0),
+    ("worker_stop_timeout_ms", 1_000.0, "timeouts_ms.worker_stop", 1_000.0),
+    ("worker_restart_min_ms", 250.0, "worker_restart_ms.min", 250.0),
+    ("worker_restart_max_ms", 20_000.0, "worker_restart_ms.max", 20_000.0),
+    ("calibration_runs", 5, "calibration_runs", 5),
     ("socket_rcvbuf_bytes", 65_536, "socket.rcvbuf_bytes", 65_536),
     ("socket_sndbuf_bytes", 65_536, "socket.sndbuf_bytes", 65_536),
+    ("receive_queue_frames", 8, "receive_queue_frames", 8),
     ("downlink_queue_commands", 4, "downlink_queue_commands", 4),
     ("ping_interval_ms", 1_000.0, "ping_interval_ms", 1_000.0),
     ("robot_retention_s", 60.0, "robot_retention_s", 60.0),
@@ -483,7 +651,7 @@ def test_echo_of_the_default_config_lists_every_setting_with_its_default() -> No
             },
         },
         "pacing": {"headroom_cores": 0.1, "min_share_cores": 0.25, "io_cpu_ms_per_frame": 0.15},
-        "worker_nice": 10,
+        "worker_nice": 0,
         "max_connections": 64,
         "auth_required": False,
         "ingress": {
@@ -500,9 +668,15 @@ def test_echo_of_the_default_config_lists_every_setting_with_its_default() -> No
             "slow_consumer": 1_000.0,
             "warmup": 120_000.0,
             "shutdown_grace": 2_000.0,
+            "close": 1_000.0,
+            "ping": 30_000.0,
+            "worker_stop": 2_000.0,
         },
-        "socket": {"rcvbuf_bytes": 40_960, "sndbuf_bytes": 40_960},
+        "socket": {"rcvbuf_bytes": 40_960, "sndbuf_bytes": 4096},
+        "receive_queue_frames": 4,
         "downlink_queue_commands": 8,
+        "calibration_runs": 3,
+        "worker_restart_ms": {"min": 500.0, "max": 10_000.0},
         "ping_interval_ms": 2_000.0,
         "robot_retention_s": 300.0,
         "max_robot_entries": 256,

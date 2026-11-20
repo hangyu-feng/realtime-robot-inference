@@ -93,14 +93,14 @@ The path of one frame, with the latency stage each step produces (section 7 defi
 
 ### 1.4 Bounds and failure handling
 
-- **Bounded everywhere.** One slot per robot. A small bounded downlink queue per connection that drops the oldest command. A maximum message size. A connection cap. Handshake and idle timeouts. Fixed-size histograms. Per-robot metric entries are capped and expire, so reconnect churn cannot grow memory.
-- **Input validation.** Bad header, wrong protocol version, unknown model, zero-byte, truncated or corrupt JPEG, wrong resolution. One bad frame fails alone: frames are decoded one by one, so it cannot fail its batch or crash a worker. The image size declared in the JPEG header is checked before decoding, so a frame cannot make a worker allocate more than one frame's worth of pixels.
-- **Fault isolation.** Each connection's task has its own exception boundary. Workers are supervised: a crashed worker is restarted and its in-flight batch is dropped, not retried. Inference has a timeout. If one model is down, the other keeps serving.
-- **Slow consumer.** A robot that stops reading cannot grow the server's write buffer. Past a time limit it is disconnected.
-- **Half-open connections.** A peer that vanishes without closing is found by the idle timeout. The frame stream is the heartbeat.
+- **Bounded everywhere.** One slot per robot. A small bounded downlink queue per connection that drops the oldest command. A maximum message size. A connection cap, and a cap on connections that have not yet said hello. At most a few `/metrics` responses at once. Handshake and idle timeouts. Fixed-size histograms. Per-robot metric entries are capped and expire, so reconnect churn cannot grow memory.
+- **Input validation.** Bad header, wrong protocol version, unknown model, zero-byte, truncated or corrupt JPEG, wrong resolution. One bad frame fails alone. At the gateway, a frame whose header fails validation (malformed, a wrong session number, a frame number not above the last accepted one, implausible timestamps) is dropped and counted, and the connection stays open; a malformed text message closes the connection. In the worker, frames are decoded one by one, so a frame cannot fail its batch or crash a worker. The image size declared in the JPEG header is checked before decoding, so a frame cannot make a worker allocate more than one frame's worth of pixels.
+- **Fault isolation.** Each connection has its own exception boundary: around its task, and around each command write that a model's dispatcher makes for it. Workers are supervised: a crashed worker is restarted and its in-flight batch is dropped, not retried; a restart that fails is tried again after a capped backoff for as long as the gateway runs. A batch whose inference raises an error fails alone and the worker keeps serving. Inference has a timeout. If one model is down, the other keeps serving.
+- **Slow consumer.** A robot that stops reading cannot grow the server's write buffer: a command is written only when the transport holds nothing unsent, and the others wait in the bounded downlink queue. Once the kernel refuses a command, the robot is disconnected if the backlog has not cleared within a time limit. How soon the kernel refuses depends on the socket buffers of both ends, which are sized for commands.
+- **Half-open connections.** A peer that vanishes without closing is found by the idle timeout. The frame stream is the heartbeat. In the other direction, a robot whose frames stay unsent for a stall timeout ends the session and reconnects; commands are not a heartbeat, because a starved model legitimately sends none.
 - **Disconnect race.** A result that returns after its robot has gone is dropped and counted.
-- **Reconnect.** The robot backs off exponentially with jitter. A second connection with the same robot id replaces the first session. Frame numbers may restart, so ordering is checked per session, and messages carry the session number.
-- **Startup and shutdown.** Connections are accepted only after both models are loaded and warmed (`/healthz`). On SIGTERM the gateway stops accepting, closes connections and stops the workers. A model that fails to load fails fast with a clear error. Workers exit when their gateway connection closes.
+- **Reconnect.** The robot backs off exponentially with jitter. A second connection with the same robot id replaces the first session, which is closed with 4001; a robot closed that way does not reconnect, so two processes with one id cannot evict each other for ever. A second hello that admission refuses leaves the first session untouched. Frame numbers may restart, so ordering is checked per session, and messages carry the session number.
+- **Startup and shutdown.** Connections are accepted only after both models are loaded and warmed (`/healthz`). The models warm up one at a time. On SIGTERM the gateway stops accepting, ends every session and lets the batches in flight finish within a grace period, then aborts what is left and stops the workers, all within the container's stop timeout. A model that fails to load fails fast with a clear error. Workers exit when their gateway connection closes.
 - **Idle.** With no robots connected, nothing spins.
 
 ### 1.5 Soft state: availability in the cloud, freshness on the robot
@@ -119,7 +119,7 @@ One row per design question of the brief (Q), per demo (D), for the topology com
 | ID | Claim | Strongest objection | Experiment | Metric fields | Plot or table | Status |
 |---|---|---|---|---|---|---|
 | Q1a Language and framework | Python is enough here. Inference runs in native code in separate processes. The Python share (frame I/O and scheduling in one event loop) at 50 robots is `{{massive.gateway.cpu_cores}}` cores, with event-loop lag p99 of `{{massive.gateway.loop_lag_ms.p99}}` ms. | One Python event loop cannot move 1500 frames per second without adding latency. A compiled gateway is the obvious choice. | `massive`; `massive` with the null model to isolate transport and scheduling | `processes.gateway.*`, `loop.lag_ms`, `connections.bytes_in`, `stages.<m>.transport_up_ms` | `massive.md`, `sweep_cpu.png` | planned |
-| Q1b Transport | WebSocket over TCP fits this container: message framing, close codes and an HTTP endpoint on one port, at an uplink cost of `{{massive.stage.transport_up_ms.p50}}` ms per frame. Its weakness, head-of-line blocking, needs packet loss and so does not appear at 50 robots on loopback. | TCP delivers every frame in order, including frames that are already stale. Datagrams would let stale data die in the network. | `massive`; delay sweep with the link model; a loss run with `tc netem` in the `split` topology if the kernel supports it | `stages.<m>.transport_up_ms`, `robots.<id>.models.<m>.frames_overwritten`, telemetry `freshness_ms` | `delay_sweep.png`, `massive.md` | planned |
+| Q1b Transport | WebSocket over TCP fits this container: message framing, close codes and an HTTP endpoint on one port, at an uplink cost of `{{massive.stage.transport_up_ms.p50}}` ms per frame. Its weakness, head-of-line blocking, needs packet loss and so does not appear at 50 robots on loopback. | TCP delivers every frame in order, including frames that are already stale. Datagrams would let stale data die in the network. | `massive`; delay sweep with the link model; a loss run with `tc netem` in the `split` topology if a root container with NET_ADMIN is added for it | `stages.<m>.transport_up_ms`, `robots.<id>.models.<m>.frames_overwritten`, telemetry `freshness_ms` | `delay_sweep.png`, `massive.md` | planned |
 | Q1c Batcher | A pull-based scheduler with a measured batch cap fits one inference thread per model. The cap is the largest calibrated batch size whose batch time fits the model's freshness budget, and batch size 1 is measured against it: `{{model_bench.cls.batch_cap}}` for classification and `{{model_bench.depth.batch_cap}}` for depth. | On one inference thread a larger batch may add latency without adding throughput. | `model_bench`; the comparison of batch cap 1 against the default cap; batch-size distributions from `sweep` | `workers.<m>.t_b_ms`, `workers.<m>.t_b_cpu_ms`, `models.<m>.batch_size`, `models.<m>.batch_ms` | `model_tb.png`, `sweep_batch_size.png` | planned |
 | Q2 Frame management | One newest-frame slot per robot with late binding keeps freshness bounded at any load: at most one frame period of slot wait, plus one service time, plus overhead. Thresholds are 150 ms for depth and 500 ms for classification. Stale ratio in the steady demo: `{{steady.depth.stale_ratio}}` for depth and `{{steady.cls.stale_ratio}}` for classification. | A short FIFO queue is simpler and loses fewer frames. And 150 ms may be out of reach for depth on slower hardware. | `steady` under latest-wins and under FIFO; stale ratio against threshold from per-command samples; the depth margin reported at startup | telemetry `freshness_ms`, `commands_stale`; `frames_overwritten`; `workers.depth.margin_ms` | `fifo_vs_latest.png`, `stale_ratio_vs_threshold.png` | planned |
 | Q3 Batch, scheduling, scaling | Per-robot throughput of a model stays at 30 fps while its utilization (demand over measured capacity) is below 1, and falls as capacity over N above that. The inflection is at N* = capacity / 30: `{{sweep.cls.inflection_n}}` robots for classification and `{{sweep.depth.inflection_n}}` for depth. The CPU share per model, the CPU cost per frame and the pacing share move it. | The inflection point is a property of the test machine, not of the design. | `sweep`; the capacity model run before the sweep; the candidates in section 12 that change share or cost | `robots.<id>.models.<m>.commands_sent`, telemetry `freshness_ms`, `models.<m>.batch_size`, `models.<m>.busy_ms`, `cgroup.cpu_usage_us`, `cgroup.throttled_us` | `sweep_throughput.png`, `sweep_freshness.png`, `sweep_batch_size.png`, `sweep_cpu.png`, `predicted_vs_measured.md` | planned |
@@ -127,11 +127,11 @@ One row per design question of the brief (Q), per demo (D), for the topology com
 | D1 Steady load | With 1 robot at 30 fps for 30 s, freshness stays bounded: no upward trend, and p50, p95, p99 and max are reported per model. | 30 s is too short to show drift, and a maximum can hide a slowly growing queue. | `steady`, repeated; a trend test of freshness against time; `soak` covers the long run | telemetry `freshness_ms`; per-command samples | `steady_freshness.png`, `steady.md` | planned |
 | D2 Late joiner | When B joins, capacity is split evenly at once: A and B end with the same per-robot throughput on each model, and A's p95 freshness does not change. | The newcomer gets a burst, or the incumbent keeps an advantage. | `late_joiner`; windows 0 to 10 s and 10 to 30 s | per-robot `commands_sent` and telemetry `freshness_ms`, per window | `late_joiner_throughput.png`, `late_joiner.md` | planned |
 | D3 Scaling sweep | The sweep shows per-robot throughput, p50 and p95 freshness, the batch-size distribution per model and CPU utilization at 1, 3, 5 and 10 robots, against predictions written before the runs. | The results depend on how robot phases line up and on the simulator sharing the CPU. | `sweep` with random phases (default) and with aligned phases; `single` and `split` | as Q3, plus telemetry `fire_lag_ms` | the four sweep plots, `sweep.md` | planned |
-| D4 Disconnect | After one of 3 robots is killed with SIGKILL at 20 s, the survivors' depth throughput rises as the freed share is redistributed, nothing errors, and the dead robot's state is released. | A dead peer that never closes its socket keeps its share or leaks state. | `disconnect`; windows 0 to 20 s and 20 to 40 s; a SIGSTOP variant in the fault tests covers the half-open case | per-robot `commands_sent` per window, `connections.closed`, `frames_dropped_disconnect`, `cgroup.memory_*` | `disconnect_throughput.png`, `disconnect.md` | planned |
+| D4 Disconnect | After one of 3 robots is killed with SIGKILL at 20 s, the survivors' depth throughput rises as the freed share is redistributed, nothing errors, and the dead robot's state is released. | A dead peer that never closes its socket keeps its share or leaks state. | `disconnect`; windows 0 to 20 s and 20 to 40 s; a SIGSTOP integration test covers the half-open case | per-robot `commands_sent` per window, `connections.closed`, `frames_dropped_disconnect`, `cgroup.memory_*` | `disconnect_throughput.png`, `disconnect.md` | planned |
 | D5 Massive connections | 50 robots for 30 s: no crash, flat memory, and no robot starved. Per-robot command rates stay close together on each model, and every command gap stays within the scheduler's bound. | Equal shares of too little is still starvation: a command that arrives too rarely cannot control a robot. | `massive`, repeated; `soak` for memory; watchdog coverage reported per model | `robots.<id>.models.<m>.commands_sent`, `max_service_gap_ms`; telemetry `watchdog_expired_ms`; `cgroup.memory_anon_bytes`, `cgroup.memory_sock_bytes`; `connections.*` | `massive_fairness.png`, `massive_memory.png`, `coverage_vs_watchdog.png`, `massive.md` | planned |
-| T1 Topology | Running the simulator inside the limited container costs the system `{{massive.fleet.cpu_cores}}` cores at 50 robots. The `split` topology shows what the cloud does with the full 2 CPUs. | In production the robots are elsewhere, so a co-located simulator distorts both capacity and timing. | every scenario in `single` and in `split`, in alternating order | fleet `processes`, telemetry `fire_lag_ms`, all freshness and throughput fields | `topology.md` | planned |
-| R1 Bounded resources | Memory does not grow: the slope is `{{soak.memory.slope_mb_per_min}}` MB per minute over 5 minutes at 50 robots, and fd and task counts stay flat. | Slow leaks (per-robot metrics, reconnect churn) do not show in 60 s. | `soak`; the reconnect-churn fault run | `cgroup.memory_anon_bytes`, `cgroup.memory_sock_bytes`, `processes.<p>.fds`, `loop.tasks` | `soak_memory.png` | planned |
-| R2 Disconnect and reconnect | A robot that disconnects or reconnects does not affect the others: their throughput and freshness stay within run-to-run spread. | A reconnect storm resets fairness or leaks sessions. | reconnect integration test; the churn fault run | `connections.*`, per-robot rates, `robots.<id>.session` | `faults.md` | planned |
+| T1 Topology | Running the simulator inside the limited container costs the system `{{massive.fleet.cpu_cores}}` cores at 50 robots. The `split` topology runs the cloud alone under the quota with the same pacing reserve, and shows what the simulator does to timing and throttling. | In production the robots are elsewhere, so a co-located simulator distorts both capacity and timing. | every scenario in `single` and in `split`, in alternating order | fleet `processes`, telemetry `fire_lag_ms`, all freshness and throughput fields | `topology.md` | planned |
+| R1 Bounded resources | Memory does not grow: the slope is `{{soak.memory.slope_mb_per_min}}` MB per minute over 5 minutes at 50 robots, and fd and task counts stay flat. | Slow leaks (per-robot metrics, reconnect churn) do not show in 60 s. | `soak`; the reconnect-churn integration test | `cgroup.memory_anon_bytes`, `cgroup.memory_sock_bytes`, `processes.<p>.fds`, `loop.tasks` | `soak_memory.png` | planned |
+| R2 Disconnect and reconnect | A robot that disconnects or reconnects does not affect the others: a frozen robot is closed by the idle timeout and comes back under a new session, and the other robots' classification rate stays close to its rate before. | A reconnect storm resets fairness or leaks sessions. | the frozen-robot reconnect integration test (SIGSTOP); the churn integration test | `connections.*`, per-robot rates, `robots.<id>.session` | `faults.md` | planned |
 
 ## 3. Assumptions
 
@@ -202,7 +202,7 @@ Each record states the context, the options, the decision, the consequence, and 
   - TLS ends at the load balancer. Inside the container the connection is plain `ws`. TLS cost is not measured.
   - The handshake carries a protocol version and an auth token. An unknown version is rejected. The token is checked against an optional shared token, off by default. Real authentication is not built.
   - The frame protocol (`common/protocol.py`) does not depend on the transport. WebSocket sits behind a small adapter, and tests use an in-memory adapter. A QUIC adapter is the migration path for lossy links. It is not built.
-- **Consequence.** TCP delivers in order. On a lossy link one lost segment delays every frame behind it (head-of-line blocking). Late frames still cost little compute, because each one overwrites the slot on arrival and only the newest is decoded, but they arrive late. This is a weakness on production networks. It is not a bottleneck at 50 robots on loopback, where nothing is lost. To keep TCP from hiding a queue, socket buffers are sized so that a stalled path holds about two frames, and the robot skips a frame when the previous one is still unsent. The robot also sets `TCP_NOTSENT_LOWAT`, but on loopback one segment can carry a whole frame past it, so the buffer sizes are what bound the path.
+- **Consequence.** TCP delivers in order. On a lossy link one lost segment delays every frame behind it (head-of-line blocking). Late frames still cost little compute, because each one overwrites the slot on arrival and only the newest is decoded, but they arrive late. This is a weakness on production networks. It is not a bottleneck at 50 robots on loopback, where nothing is lost. To keep TCP from hiding a queue, the buffers that carry frames (the robot's send buffer and the gateway's receive buffer) are sized so that a stalled path holds about two frames of the default frame set, the buffers that carry commands (the gateway's send buffer and the robot's receive buffer) to a few kilobytes, and the robot skips a frame when the previous one is still unsent. The robot also sets `TCP_NOTSENT_LOWAT`, but on loopback one segment can carry a whole frame past it, so the buffer sizes are what bound the path.
 - **At 50 robots.** The cost is bytes: `{{massive.bytes_in_per_s}}` bytes per second into the gateway, and an uplink stage of `{{massive.stage.transport_up_ms.p99}}` ms at p99.
 
 Wire protocol, version 1:
@@ -214,7 +214,8 @@ Wire protocol, version 1:
 | `frame` | robot to cloud | binary header plus JPEG | session number, frame number, scheduled capture time, send time (both on the robot's clock) |
 | `command` | cloud to robot | binary header plus body | model, session number, frame number, capture time (echoed), batch size, server stage durations, gateway result time, command body |
 | `telemetry` | robot to cloud | JSON, 1 Hz | the robot-reported fields of section 10.4 |
-Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error, 1008 policy (bad version, bad token, ingress limit), 1009 message too big, 1013 over the connection cap, 4001 session replaced, 4002 slow consumer, 4003 idle timeout.
+
+Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error (a first message that is not a hello, a malformed text message), 1008 policy (bad version, bad token, unknown model, ingress limit), 1009 message too big, 1013 over the connection cap, 4001 session replaced, 4003 idle timeout (also no hello within the handshake timeout). Two kinds of end are aborted without a close frame: a slow consumer, because it is found only while bytes to it are unsent and a close frame would wait behind them (code 4002 stays reserved for it in the protocol and is not sent), and a connection ended by a fault in the gateway's own code. A robot does not reconnect after 1002, 1007, 1008, 1009 or 4001, because retrying would repeat the refusal or start a replacement loop; it reconnects, with backoff, after any other close, an abort, a refused connection or an HTTP 503. Robots connect to the path `/ws`.
 
 ### 4.4 Batcher and scheduler
 
@@ -229,7 +230,7 @@ Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error, 1008 policy
 - **Context.** Slots live in the gateway and workers pull, so every dispatch is a round trip through the gateway's event loop. The classifier's service time is short, so the round trip may be a visible share of it.
 - **Options.** (a) A Unix socket with length-prefixed messages carrying raw JPEG bytes. (b) `multiprocessing` queues with pickled arrays. (c) A shared-memory slot table that workers read directly. (d) A message library or RPC layer.
 - **Decision.** (a). One message each way per cycle: the worker's message carries the results of the previous batch and the request for the next one.
-- **Consequence.** The round trip is reported as its own stage, `dispatch_rt`, not folded into batch wait. Per-process CPU accounting gives per-model CPU attribution directly. (c) removes the gateway from the dispatch path but spreads scheduler state across processes, which costs testability. It is reconsidered only if the round trip exceeds about 10% of the classifier's service time.
+- **Consequence.** The round trip is reported as its own stage, `dispatch_rt`, not folded into batch wait. The gateway stamps a result when its last byte arrives, in the socket callback, before its dispatcher resumes, so `dispatch_rt` holds no wake-up of the gateway's own tasks. On a result the dispatcher queues the commands, selects and writes the next batch, and only then writes the commands, so between two batches the worker waits for the scheduler's work and one wake-up of the dispatcher. Per-process CPU accounting gives per-model CPU attribution directly. (c) removes the gateway from the dispatch path but spreads scheduler state across processes, which costs testability. It is reconsidered only if the round trip exceeds about 10% of the classifier's service time.
 - **At 50 robots.** The round trip costs `{{massive.stage.dispatch_rt_ms.p50}}` ms.
 
 ### 4.6 Model runtime
@@ -246,7 +247,7 @@ Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error, 1008 policy
 
 | Policy | Result |
 |---|---|
-| FIFO queue, drop new frames when full | Old frames are processed first, so freshness grows without bound under overload. Kept as a switch for the control experiment. |
+| FIFO queue, drop new frames when full | Old frames are processed first, so a served frame is as old as the queue is long: freshness grows with the queue length and with the robot count, and for the whole run when the queue never fills. Kept as a switch for the control experiment. |
 | FIFO queue, drop the oldest when full | Better, but unfair between robots. |
 | **One slot per robot, newest frame wins** | Memory bound of one frame per robot. Sending faster gains no share. Chosen. |
 | Credits granted by the server | Saves bandwidth. Each grant costs a round trip, so a worker idles when the network has delay. |
@@ -263,11 +264,14 @@ Places where a queue could hide, and what closes each one:
 
 | Place | Risk | What closes it |
 |---|---|---|
-| WebSocket library receive queue | Frames wait behind a slow reader. | The reader only overwrites the slot, so it always drains. |
-| asyncio write buffer | Grows without bound if unchecked. | Bounded downlink queue per connection; slow consumers are disconnected. |
-| Kernel socket buffers | Loopback buffers auto-tune to many frames. | Small `SO_RCVBUF` and `SO_SNDBUF`, sized so that a path whose reader has stopped holds about two frames. Linux doubles the size requested. The transport benchmark reports what a stalled path holds. |
+| WebSocket library receive queue | Frames wait behind a slow reader. | A high-water mark of a few frames, above which the library stops reading. The reader awaits nothing else and only overwrites the slot, so it drains the queue in one loop pass. |
+| asyncio write buffer | Grows without bound if unchecked. | A write limit of 0: each send waits until nothing is unsent, so at most one command's remainder and one whole command sit in user space. The bounded downlink queue holds the rest; a backlog that does not clear within the slow-consumer timeout closes the connection. |
+| Kernel socket buffers | Loopback buffers auto-tune to many frames. | Fixed sizes, set before the connection exists: where frames travel (the gateway's receive buffer, the robot's send buffer), sized so that a path whose reader has stopped holds about two frames of the default frame set; a few kilobytes where commands travel. Linux doubles the size requested; the sizes the kernel grants are read back and logged, and the transport benchmark reports what a stalled path holds. |
 | Robot send path | The kernel accepts frames it cannot send yet. | The robot skips a frame while the previous one is unsent, and a send is complete only when the kernel holds the whole frame. `TCP_NOTSENT_LOWAT` is set too, but a loopback segment can carry a whole frame past it. |
 | Gateway to worker | A pushed batch waits at a busy worker. | Workers pull. At most one batch per worker is in flight. |
+| Link-model delay lines | Injected delay buffers messages in the simulator. | Each line holds what its delay covers at the message rate. A full uplink line skips the tick; a full downlink line stops the robot reading, which pushes back on the gateway. |
+| Connections before their hello | Many open connections that never say hello. | Open connections are capped at twice the connection cap; beyond it the upgrade is answered with 503. |
+| `/metrics` responses | Many concurrent scrapes hold snapshots. | At most four render at once; beyond that the request is answered with 503. |
 
 ### 5.2 Freshness thresholds
 
@@ -304,9 +308,9 @@ On one host all processes share a monotonic clock. The latency breakdown uses th
 Freshness has a floor that does not depend on load (section 6.3): slot wait, plus one service time, plus overhead, plus twice the one-way link delay. If the floor is above the threshold, no scheduling can help.
 
 - At startup each worker measures its service time and the gateway reports the margin per model: threshold minus one frame period, minus the service time at the batch cap, minus an overhead allowance. It appears as `workers.<m>.margin_ms` and in the log.
-- **Skip rule.** When a robot's pending frame would be stale by the time its result arrives, and a fresher frame from that robot could still make it, the scheduler skips the frame and takes the next robot.
+- **Skip rule.** When only one robot has a pending frame, that frame would be stale by the time its result arrives, and a fresher frame from that robot could still make it, the scheduler drops the frame and waits for the next frame to arrive. When two or more robots have a pending frame it skips nothing, so the rule never changes whose turn it is. On a host with a negative margin, robots that share a saturated model then get equal shares and the stale ratio that the margin implies.
 - **The skip rule can never starve.** It is off for a model whose service time alone exceeds the threshold, and it never leaves a robot unserved for longer than a configured interval.
-- **Degradation order on slow hardware.** First, depth gets a second thread, which shortens its service time at the cost of CPU efficiency. If that is not enough, the system keeps serving and reports the threshold as infeasible on this host (`workers.<m>.feasible` is false). It does not silently produce a stream that is entirely stale.
+- **On slow hardware.** When a model's service time alone exceeds its threshold, the system keeps serving and reports the threshold as infeasible on this host (`workers.<m>.feasible` is false). It does not silently produce a stream that is entirely stale. The system never changes a thread count by itself. A second depth thread (`models.depth.threads`) is a setting an operator changes: it can shorten the service time while CPU is idle, at a cost in CPU per frame (section 6.2).
 
 ### 5.6 Results
 
@@ -326,10 +330,10 @@ One scheduler per model, driven by the worker's "ready" message:
 1. Collect the eligible robots: connected, subscribed to this model, with a slot frame this model has not finished with.
 2. If pacing holds this model back (section 6.4), wait until it is released, then collect again. The frames chosen are the ones that are newest at dispatch time.
 3. Order eligible robots by the time they were last served by this model, oldest first. A robot id that has never been served goes first, once.
-4. Apply the skip rule (section 5.5).
+4. If exactly one robot is eligible, apply the skip rule (section 5.5).
 5. Take up to the batch cap and send them. If nobody is eligible, hold the worker's request until a frame arrives. Nothing polls.
 
-Properties that the tests assert: frames are conserved (section 10.3); the frame served is always that robot's newest; frame numbers increase per robot, model and session; with the skip rule off, among robots with a pending frame, service counts differ by at most one, a faster sender gets no extra share, and a robot that reconnects gains no share, because its last-served time is kept per robot id for a while; with the skip rule on, every robot is still served within the bound of section 6.3. The skip rule passes over a robot whose pending frame would arrive stale, so a robot whose frames wait less before dispatch, for example because it sends faster, can then be served more often than the others.
+Properties that the tests assert: frames are conserved (section 10.3); the frame served is always that robot's newest; frame numbers increase per robot, model and session; with the skip rule off, among robots with a pending frame, service counts differ by at most one, a faster sender gets no extra share, and a robot that reconnects gains no share, because its last-served time is kept per robot id for a while; with the skip rule on, every robot is still served within the bound of section 6.3. The skip rule acts only when one robot has a pending frame, so it does not change the order among robots that are waiting.
 
 Two options are planned experiments (section 12) and are not built: waiting for the next frame when the only pending frame is older than half a frame period and no other robot is eligible, and a per-robot rate cap per model.
 
@@ -339,7 +343,7 @@ Write T(b) for the wall time of one batch of size b in the worker, and c(b) for 
 
 - **Rule.** The cap is the largest calibrated batch size whose T(b) fits the model's freshness budget: the model's configured stale threshold minus one frame period and the overhead allowance. When none fits, the cap is the smallest size and the margin is negative. The batch-cap comparison of section 12 sets the cap by configuration instead.
 - **Comparison with 1.** Batch size 1 is always measured against the default cap, on per-robot throughput and freshness (section 12). When c(b) is flat, a larger batch gives the same throughput and makes every frame in it wait for the whole batch. When a dispatch has a fixed cost, a larger batch spreads it over more frames. The comparison shows which effect wins on the test machine.
-- **Calibration.** At warm-up each worker runs every allowed batch size (1, 2, 4, 8), which also grows the runtime's memory arena to its final size. It reports T(b) as wall and CPU time to the gateway. The cap is computed once and fixed for the run. This adapts to unknown hardware without a feedback loop.
+- **Calibration.** At warm-up each worker runs every allowed batch size (1, 2, 4, 8): one untimed run, which also grows the runtime's memory arena to its final size, then a configured number of timed runs, whose medians it reports to the gateway as T(b) in wall and CPU time. The workers warm up one at a time, so neither calibration competes with the other for the quota. Depth calibrates on the patched copy of the MiDaS graph, which runs every batch size; when its cap comes out at 1, the worker loads the published file and measures batch size 1 again on it (section 4.6). The cap is computed once and fixed for the run. A restarted worker serves the same cap with the same file and calibrates only the sizes up to the cap; the gateway keeps the first calibration. This adapts to unknown hardware without a feedback loop.
 - **Extension.** Where T(b) grows more slowly than b, for example on a GPU or with a multi-thread session, the same rule yields a larger cap with no change.
 
 Measured on the test machine (`model_tb.png`):
@@ -419,8 +423,9 @@ The model is an idealization, and its limits are stated before the first end-to-
 
 - The limit is a quota: the container may use Q x P of CPU time per period P. When total demand D exceeds Q, the kernel freezes every process in the container for the rest of the period. The gateway stops reading, the classifier stalls and the simulator's timers fire late. So the freeze inflates the freshness tail and corrupts the measurement at the same moment.
 - **Budget.** The gateway, the simulator and the classifier get what they need. The depth worker is saturated by design and is the one elastic consumer, so it is paced: after each batch it becomes eligible again only once its duty cycle is back under its share. The idle time is then taken by depth alone, not by the whole container.
-- The pacing share is feed-forward, not a feedback loop. When a robot joins or leaves, the gateway recomputes it from the frame rates the connected robots declared, the workers' calibrated CPU time per frame and a configured CPU cost per frame of the frame I/O: the quota, minus a headroom, minus the predicted demand of the other consumers (the frame I/O of the gateway and, in the `single` topology, the simulator, plus each unpaced worker at its calibrated CPU time per frame, capped at its threads, or at the quota when ONNX Runtime chooses its thread count), and never below a minimum share. When that leaves the paced worker at least as many cores as it can use (its threads, or the quota when ONNX Runtime chooses its thread count), it is not paced, and without a CPU quota nothing is paced. Throttled time, classifier p99 freshness and fire lag are compared with pacing on and off.
-- Under a cpuset limit or on a real 2-core host there is no freeze. The same contention shows up as time slicing. For that case workers run at lower priority (nice +10), so the gateway and the simulator preempt them.
+- The pacing share is feed-forward, not a feedback loop. When a robot joins or leaves, the gateway recomputes it from the frame rates the connected robots declared, the workers' calibrated CPU time per frame and a configured CPU cost per frame of the frame I/O: the quota, minus a headroom, minus the predicted demand of the other consumers (the frame I/O at that configured cost, which covers the gateway and the co-located simulator and is reserved in both topologies, plus each unpaced worker at its calibrated CPU time per frame, capped at its threads, or at the quota when ONNX Runtime chooses its thread count), and never below a minimum share. When that leaves the paced worker at least as many cores as it can use (its threads, or the quota when ONNX Runtime chooses its thread count), it is not paced, and without a CPU quota nothing is paced. The I/O cost is one setting, `pacing.io_cpu_ms_per_frame`, whose default is set for the gateway and the simulator together. The evidence runs keep that default in the `split` topology, where the simulator runs outside the quota, so the share still reserves the simulator's part there and the depth worker is paced to the same share as in `single`. Throttled time, classifier p99 freshness and fire lag are compared with pacing on and off.
+- The share holds over each dispatch-to-dispatch span, not within one quota period, because a batch cannot be interrupted. A period that holds a whole depth batch must fit the classifier's CPU, the frame I/O and that batch in Q x P; where it does not, that period ends in a freeze that no share removes. A depth batch longer than the period (caps above 1) always overruns while the classifier is saturated.
+- Under a cpuset limit or on a real 2-core host there is no freeze. The same contention shows up as time slicing. Workers can run at lower priority (`worker_nice`), so that the gateway and the simulator preempt them, but the default niceness is 0: under the CPU quota niceness has no effect, and on a two-CPU cpuset a niced depth batch that shares its CPU with a busy process stretches about tenfold, which is why it is off by default.
 - `cgroup.nr_throttled` and `cgroup.throttled_us` are in `/metrics`, so every run shows whether it was throttled.
 
 ### 6.5 The inflection point
@@ -464,10 +469,12 @@ Stages are consecutive intervals on one clock, so they add up to the end-to-end 
 
 `dispatch_rt_ms` is the sum of the two IPC legs. `batch_peers_ms` is defined as the worker's time for the batch minus this frame's own decode, preprocess, inference and postprocess, so the worker stages add up exactly. At batch size 1 it is only the worker's own untimed overhead, close to zero.
 
+Each boundary is one clock reading, taken once: the robot stamps the send at the tick, the gateway stamps a frame when its reader gets it from the WebSocket library, a dispatch when the scheduler selects it, and a result in the socket callback that completes it; the robot stamps the command when it gets it. The time between the result and the write of the command falls in `deliver_ms`. The eight server stages travel as whole microseconds, computed as differences of cumulative offsets rounded down, so they add up exactly to the whole interval.
+
 How the sum is checked:
 
 - Every command carries its server-side stage durations back to the robot, so one robot-side record holds the whole breakdown.
-- Sums use means, because means add and percentiles do not. The residual is the mean end-to-end time minus the sum of the stage means, and it is shown as its own row.
+- Sums use means, because means add and percentiles do not. The residual is the mean end-to-end time minus the sum of the stage means, and it is shown as its own row. On a shared clock the residual of each command is below one microsecond by construction, so a larger one means a boundary was stamped twice or not at all. Without a shared clock `transport_up` is an estimate and the residual is real.
 - Tails are reported per stage as p50 and p95.
 
 | Stage | `cls` mean | `cls` p50 | `cls` p95 | `depth` mean | `depth` p50 | `depth` p95 |
@@ -500,10 +507,10 @@ The brief names four kinds of mechanism. The system uses all four, each for a di
 |---|---|---|
 | Connection admission | Every robot is accepted up to a configurable cap (default 64). Beyond it the handshake is refused with close code 1013. | A safety valve, not the main control. |
 | Per-robot quota | Fair rotation: each model serves robots least recently served first, so each robot gets one N-th of each model's capacity. | No robot can take another's share. |
-| Adaptive drops | The slot overwrite, plus the skip rule of section 5.5. | Compute goes only to frames that can still be fresh. |
+| Adaptive drops | The slot overwrite: each model serves a robot's newest frame, and older frames are dropped unprocessed. The skip rule of section 5.5 acts only while one robot is waiting, so it plays no part at 50 robots. | Compute goes only to each robot's newest frame. |
 | Backpressure | Bounded downlink queues, disconnection of slow consumers, and an ingress limit per connection (messages and bytes per second, every message counted before it is decoded). A server-advised frame rate is a planned experiment (section 12), not built. | One robot cannot cost the others event-loop time or memory. |
 
-In addition, the CPU budget of section 6.4 keeps the container under its quota at this load.
+In addition, the CPU budget of section 6.4 paces the depth worker at this load; the container was throttled for `{{massive.cpu.throttled_ms_per_s}}` ms per second.
 
 **Why refusal is not the main mechanism.** A refused robot is a starved robot, which is what the brief asks to avoid. Refusal would be justified only against a stated minimum useful rate per robot. No such rule is built; the useful capacity of section 8.2 is the number it would be set from.
 
@@ -628,7 +635,7 @@ Time from the kill until the server closes the connection: `{{disconnect.detect_
 
 ### 9.6 Topology comparison
 
-Every scenario also runs in the `split` topology, where the robots have their own container and the cloud has the 2 CPUs to itself. Runs alternate between the two topologies.
+Every scenario also runs in the `split` topology, where the robots have their own container and the cloud has the 2 CPUs to itself. The robots' container has a memory limit of 2 GB and no CPU limit, so the simulator cannot be the bottleneck of that run; its CPU is recorded from its own cgroup. The pacing reserve of section 6.4 is one configured value in both topologies, so the depth worker's share is the same in both, and the comparison shows timing and throttling, not extra depth capacity. In `split`, frames also cross a veth pair and a bridge whose MTU is smaller than a frame, where loopback carries a whole frame in one segment, so the transport path differs as well. Runs alternate between the two topologies.
 
 | Quantity at 50 robots | `single` | `split` |
 |---|---|---|
@@ -642,17 +649,18 @@ Every scenario also runs in the `split` topology, where the robots have their ow
 
 ## 10. Metrics contract
 
-`GET /metrics` returns one JSON object. This section is the contract for it: a change to a field changes this section in the same commit. `GET /healthz` returns 200 with `{"status": "ok"}` once both workers are ready, and 503 with the worker states otherwise.
+`GET /metrics` returns one JSON object. This section is the contract for it: a change to a field changes this section in the same commit, and a test compares a rendered snapshot with the tables below. When four scrapes are already being served, or the cgroup and process files cannot be read within one second, `/metrics` answers 503 with `{"status": "busy"}` or `{"status": "stats unavailable"}`. `GET /healthz` returns 200 with `{"status": "ok"}` while the gateway accepts connections and every worker is ready, and 503 with `{"status": "unavailable", "accepting": ..., "workers": {...}}` otherwise: during warm-up, during shutdown, and while a worker restarts, when connected robots keep their sessions and new robots are still accepted.
 
 ### 10.1 Conventions
 
 - **Kinds.** A counter only grows, from gateway start. A gauge is the value now. A histogram is cumulative. The scraper reads `/metrics` once per second and computes rates and window values from differences.
 - **Units** are in the field name: `_ms`, `_us`, `_ns`, `_s`, `_bytes`.
 - **Model keys** are `cls` and `depth`. `<m>` stands for either.
-- **Time histograms** (type H below) use fixed log-scale buckets, 8 per octave, from 0.01 ms to 60 000 ms. Bucket i covers values from 0.01 x 2^(i/8) up to 0.01 x 2^((i+1)/8). Values below the range go to bucket 0 and values above it to the last bucket. A histogram is serialized as `{"count": int, "sum": float, "min": float or null, "max": float or null, "buckets": {"<i>": int}}`, with only the non-empty buckets listed; `min` and `max` are null while the histogram is empty. A quantile read from it is the upper edge of the bucket that holds the rank, so its relative error is at most one bucket width, about 9%. `count`, `sum`, `min` and `max` are exact.
+- **Time histograms** (type H below) use fixed log-scale buckets, 8 per octave, from 0.01 ms to 60 000 ms. Bucket i covers values from 0.01 x 2^(i/8) up to 0.01 x 2^((i+1)/8). Values below the range go to bucket 0 and values above it to the last bucket. A histogram is serialized as `{"count": int, "sum": float, "min": float or null, "max": float or null, "buckets": {"<i>": int}}`, with only the non-empty buckets listed; `min` and `max` are null while the histogram is empty. A quantile read from it is the upper edge of the bucket that holds the sample of rank ceil(q x count), so for a value inside the range it is at or above that sample and less than one bucket width, about 9%, above it. The percentiles in this document's tables interpolate between neighbouring samples, so where the samples around the rank are far apart, as in a sparse tail, the two can differ by more. `count`, `sum`, `min` and `max` are exact.
 - **Exact percentiles** in this document come from the robots' per-command samples, not from these histograms. The histograms are for live inspection and as a cross-check.
 - **Size bound.** Entries under `robots` are kept for a retention time after a disconnect and are capped in number, oldest disconnected first.
-- **Cost.** `/metrics` is served from the gateway's event loop. The snapshot is built from counters and histograms that are already aggregated, so a scrape does not stall the loop. Loop lag is compared with scraping on and off.
+- **Cost.** `/metrics` is served from the gateway's event loop. The snapshot is built from counters and histograms that are already aggregated, so a scrape does not stall the loop: the cgroup and process files are read in a separate thread, a robot's telemetry is kept as the object it is published as, and the robot entries are serialized in chunks with a yield to the loop between chunks.
+- **Consistency.** Each robot entry is read in one step, so the identities of section 10.3 hold for every robot in every snapshot. Totals elsewhere in the snapshot may differ from the sum over robots by what happened while the robot entries were being serialized.
 
 ### 10.2 Top level
 
@@ -661,7 +669,7 @@ Every scenario also runs in the `split` topology, where the robots have their ow
 | `schema` | int | constant | Schema version, 1 |
 | `ts_mono_ns` | int | gauge | Gateway monotonic clock at the snapshot |
 | `ts_wall_ms` | int | gauge | Wall clock at the snapshot, UTC epoch |
-| `uptime_s` | float | gauge | Time since the gateway began accepting connections |
+| `uptime_s` | float or null | gauge | Time since the gateway began accepting connections; null during warm-up |
 | `config` | object | constant | Config echo, section 10.8 |
 | `robots` | object keyed by robot id | | Section 10.3 and 10.4 |
 | `models` | object keyed by model | | Section 10.5 |
@@ -682,10 +690,10 @@ Every scenario also runs in the `split` topology, where the robots have their ow
 | `subscribed` | list of model keys | constant | From the handshake |
 | `stale_ms` | object, model to float | constant | Thresholds declared in the handshake |
 | `watchdog_ms` | object, model to float | constant | Watchdog limits declared in the handshake |
-| `rtt_ms` | float or null | gauge | Last ping round trip; null until the session's first one returns |
-| `bytes_in`, `bytes_out` | int | counter | Bytes received from and sent to this robot |
-| `frames_in` | int | counter | Frame messages that arrived |
-| `frames_rejected` | int | counter | Refused at ingress: malformed, oversized, over the rate limit |
+| `rtt_ms` | float or null | gauge | Last ping round trip, read when the robot's telemetry report arrives, in whole milliseconds (the resolution of the event loop's clock); null until the session's first one returns, and while the last one measured 0 at that resolution, which on one host is usual |
+| `bytes_in`, `bytes_out` | int | counter | Message bytes received from and sent to this robot; a text message counts its characters, which are its bytes for valid telemetry |
+| `frames_in` | int | counter | Binary messages received in its sessions, plus each message the WebSocket library refused for its size |
+| `frames_rejected` | int | counter | Refused at ingress: malformed (dropped; the connection stays open), oversized or over the rate limit (both close the connection) |
 | `frames_accepted` | int | counter | Placed in the slot |
 | `models.<m>` | object | | Per-model counters, below |
 | `telemetry` | object | | Robot-reported, section 10.4 |
@@ -702,10 +710,10 @@ Every scenario also runs in the `split` topology, where the robots have their ow
 | `frames_pending` | int | gauge | 1 if the slot holds a frame this model has not finished with, else 0 |
 | `in_flight` | int | gauge | Frames at the worker now |
 | `commands_queued` | int | gauge | Commands waiting in the robot's downlink queue now |
-| `commands_sent` | int | counter | Commands written to the robot's connection |
+| `commands_sent` | int | counter | Commands handed to the robot's connection. A command whose write fails because the connection has just closed is still counted, at most one per session |
 | `commands_dropped_downlink` | int | counter | Dropped because the downlink queue was full |
 | `results_dropped_disconnect` | int | counter | Results that came back after the robot had gone, or were still queued for it when it went |
-| `frames_failed` | int | counter | Served with no command: decode error, worker crash, timeout |
+| `frames_failed` | int | counter | Served with no command: decode error, inference error, worker crash, inference timeout, or a result the gateway refused |
 | `last_served_age_ms` | float or null | gauge | Time since this model last served this robot; null until it first does |
 | `max_service_gap_ms` | float | gauge | Longest time this robot went without a command within a session: from the session's start or a command to the next command, or, for the last interval, to now while the robot is connected and to its disconnect after it |
 
@@ -723,16 +731,16 @@ Under the FIFO control policy, `frames_pending` is the queue length and `frames_
 
 ### 10.4 `robots.<id>.telemetry`: robot-reported fields
 
-The robot sends these at 1 Hz. Counters restart with each session. The fields are absent for a robot that sends no telemetry.
+The robot sends these at 1 Hz, after a frame and only when nothing is unsent, and once more when it stops on purpose, after it has stopped taking commands, so the last report covers exactly the commands the session received. Counters and histograms restart with each session, except `reconnects`. The fields are absent until the session's first report.
 
 | Field | Type | Kind | Meaning |
 |---|---|---|---|
 | `ts_mono_ns` | int | gauge | Robot clock at the report |
-| `frames_captured` | int | counter | Ticks fired |
+| `frames_captured` | int | counter | Ticks that came due in the session, including ticks passed while the simulator woke late |
 | `frames_sent` | int | counter | |
-| `frames_skipped_send` | int | counter | Not sent because the previous frame was still unsent |
+| `frames_skipped_send` | int | counter | Ticks not sent: the previous frame was still unsent, or the simulator woke after the next tick was due. `frames_captured = frames_sent + frames_skipped_send` |
 | `fire_lag_ms` | H | histogram | Send start minus scheduled capture time. The first latency stage, and the validity check for the simulator |
-| `reconnects` | int | counter | |
+| `reconnects` | int | counter | Sessions after the first in this robot process |
 | `models.<m>.commands_received` | int | counter | |
 | `models.<m>.commands_applied` | int | counter | |
 | `models.<m>.commands_stale` | int | counter | Rejected: older than the stale threshold at receipt |
@@ -764,7 +772,7 @@ The measured CPU cost per frame of a model is its worker's CPU time (`processes.
 
 ### 10.6 `stages.<m>`: latency stages seen by the server
 
-One histogram (type H) per stage, per model. Section 7 defines the stages. `fire_lag_ms` and `deliver_ms` are measured by the robot and are in section 10.4.
+One histogram (type H) per stage, per model. Section 7 defines the stages. A command's stages are recorded when the command is queued for its robot, so the histograms describe the commands robots can receive, not frames whose robot had already gone. `fire_lag_ms` and `deliver_ms` are measured by the robot and are in section 10.4.
 
 | Field | Meaning |
 |---|---|
@@ -785,29 +793,31 @@ One histogram (type H) per stage, per model. Section 7 defines the stages. `fire
 |---|---|---|---|
 | `current` | int | gauge | Open robot connections |
 | `accepted` | int | counter | Handshakes completed |
-| `closed` | object, reason to int | counter | Reasons: `client_close`, `abnormal`, `idle_timeout`, `slow_consumer`, `ingress_limit`, `protocol_error`, `replaced`, `shutdown` |
+| `closed` | object, reason to int | counter | Reasons: `client_close`, `abnormal`, `idle_timeout`, `slow_consumer`, `ingress_limit`, `protocol_error`, `replaced`, `shutdown`, `internal_error` |
 | `rejected` | object, reason to int | counter | Reasons: `capacity`, `version`, `auth`, `bad_hello`, `unknown_model`, `handshake_timeout` |
 | `frames_rejected` | object, reason to int | counter | Reasons: `malformed` (a bad header, a wrong session number, a frame number not above the last accepted one, or implausible timestamps), `oversize`, `rate_limited` |
 | `bytes_in`, `bytes_out` | int | counter | All robot connections |
+
+Every accepted session ends once, with one reason, so `accepted = current + sum(closed)`. `internal_error` counts sessions ended by a fault in the gateway's own code and is 0 in a correct run. A peer that leaves before its hello, or says hello after shutdown has begun, is neither accepted nor rejected. Every reason is present from the start, at 0.
 
 `workers.<m>`:
 
 | Field | Type | Kind | Meaning |
 |---|---|---|---|
-| `state` | string | gauge | `warming`, `ready`, `restarting`, `failed` |
-| `pid` | int | gauge | |
+| `state` | string | gauge | `warming` (the first start, until its calibration arrives), `ready`, `restarting` (after a failure, while a new process starts and warms up), `failed` (a restart attempt failed; the next one follows a capped backoff) |
+| `pid` | int or null | gauge | Null while no worker process is live |
 | `restarts` | int | counter | |
-| `model_file`, `model_sha256` | string or null | constant | The file served; null for the fake and null model sets, which load no file |
+| `model_file`, `model_sha256` | string or null | constant | The file served; null for the fake and null model sets, which load no file, and before the first calibration |
 | `threads` | int | constant | Intra-op threads |
 | `batch_sizes` | list of int | constant | Sizes calibrated at warm-up |
-| `t_b_ms` | object, size to float | constant | Calibrated wall time per batch |
-| `t_b_cpu_ms` | object, size to float | constant | Calibrated CPU time per batch |
-| `batch_cap` | int | constant | Cap fixed for the run |
+| `t_b_ms` | object, size to float, or null | constant | Calibrated wall time per batch, from the first warm-up of the run (a restarted worker's calibration is logged, not adopted); null before it. When depth's published file is served at cap 1, size 1 is measured on that file and the larger sizes on the patched copy |
+| `t_b_cpu_ms` | object, size to float, or null | constant | Calibrated CPU time per batch, from the same warm-up; null before it |
+| `batch_cap` | int or null | constant | Cap fixed for the run; null before the first calibration |
 | `pacing_share` | float or null | gauge | CPU share this worker is paced to now, in cores; recomputed when a robot joins or leaves; null when it is not paced |
-| `margin_ms` | float | constant | The model's configured stale threshold minus one frame period, the service time at the batch cap and the overhead allowance |
-| `feasible` | bool | constant | False when the service time alone exceeds the threshold |
+| `margin_ms` | float or null | constant | The model's configured stale threshold minus one frame period, the service time at the batch cap and the overhead allowance; null before the first calibration |
+| `feasible` | bool or null | constant | False when the service time alone exceeds the threshold; null before the first calibration |
 | `timeouts` | int | counter | Inference timeouts |
-| `errors` | object, kind to int | counter | Kinds: `decode`, `inference` |
+| `errors` | object, kind to int | counter | Frames that failed: `decode` (the frame did not decode), `inference` (the batch's inference raised an error; the worker kept serving) |
 
 `cgroup`, read from the container's own cgroup files (v2, with a v1 fallback). A value the kernel does not expose is null: cgroup v1 has no socket-memory counter, `memory.peak` needs Linux 5.19 or later, and a cgroup without the cpu or memory controller has none of that controller's counters.
 
@@ -815,21 +825,21 @@ One histogram (type H) per stage, per model. Section 7 defines the stages. `fire
 |---|---|---|---|
 | `version` | int | constant | 1 or 2 |
 | `cpu_limit_cores` | float or null | constant | Quota divided by period; null when unlimited |
-| `cpu_period_us` | int | constant | |
-| `cpuset` | string | constant | Effective CPU list |
-| `cpu_usage_us`, `cpu_user_us`, `cpu_system_us` | int | counter | |
-| `nr_periods`, `nr_throttled` | int | counter | Quota periods elapsed, and periods in which the container was throttled |
-| `throttled_us` | int | counter | Total time throttled |
+| `cpu_period_us` | int or null | constant | |
+| `cpuset` | string or null | constant | Effective CPU list |
+| `cpu_usage_us`, `cpu_user_us`, `cpu_system_us` | int or null | counter | |
+| `nr_periods`, `nr_throttled` | int or null | counter | Quota periods elapsed, and periods in which the container was throttled |
+| `throttled_us` | int or null | counter | Total time throttled |
 | `memory_limit_bytes` | int or null | constant | |
 | `memory_swap_limit_bytes` | int or null | constant | |
-| `memory_current_bytes` | int | gauge | Includes page cache |
-| `memory_peak_bytes` | int | gauge | |
-| `memory_anon_bytes` | int | gauge | |
-| `memory_file_bytes` | int | gauge | |
-| `memory_sock_bytes` | int | gauge | |
-| `oom_kills` | int | counter | |
+| `memory_current_bytes` | int or null | gauge | Includes page cache |
+| `memory_peak_bytes` | int or null | gauge | |
+| `memory_anon_bytes` | int or null | gauge | |
+| `memory_file_bytes` | int or null | gauge | |
+| `memory_sock_bytes` | int or null | gauge | |
+| `oom_kills` | int or null | counter | |
 
-`processes.<p>`, for `gateway`, `worker_cls` and `worker_depth`:
+`processes.<p>`, for `gateway`, `worker_cls` and `worker_depth`. A worker's entry is null while it has no live process; its counters restart with each new process, which `workers.<m>.restarts` counts:
 
 | Field | Type | Kind | Meaning |
 |---|---|---|---|
@@ -846,7 +856,7 @@ The robot fleet is not a child of the gateway. The runner records the same field
 
 | Field | Type | Kind | Meaning |
 |---|---|---|---|
-| `lag_ms` | H | histogram | Lateness of a periodic timer in the gateway's event loop |
+| `lag_ms` | H | histogram | Lateness of a periodic timer in the gateway's event loop, sampled only while at least one robot is connected, so an idle gateway runs no timer and idle samples do not dilute it. One stall that passes several periods gives one sample. Lateness below about 1 ms is the resolution of the loop's timers |
 | `tasks` | int | gauge | Live asyncio tasks |
 
 ### 10.8 `config`: config echo
@@ -867,9 +877,12 @@ The robot fleet is not a child of the gateway. The runner records the same field
 | `max_connections` | Connection cap |
 | `auth_required` | Whether a shared token is configured |
 | `ingress` | `max_messages_per_s`, `max_bytes_per_s`, `burst_s`, `max_message_bytes`, `max_frame_age_ms` |
-| `timeouts_ms` | `handshake`, `idle`, `inference`, `slow_consumer`, `warmup`, `shutdown_grace` |
+| `timeouts_ms` | `handshake`, `idle`, `inference`, `slow_consumer`, `warmup`, `shutdown_grace`, `close`, `ping`, `worker_stop` |
 | `socket` | `rcvbuf_bytes`, `sndbuf_bytes` |
+| `receive_queue_frames` | High-water mark of the WebSocket library's receive queue, in frames |
 | `downlink_queue_commands` | Commands held per connection |
+| `calibration_runs` | Timed runs per batch size at warm-up |
+| `worker_restart_ms` | `min`, `max`: the bounds of the backoff between restart attempts |
 | `ping_interval_ms` | Period of the WebSocket ping |
 | `robot_retention_s`, `max_robot_entries` | Bounds on the `robots` table |
 | `loop_probe_ms` | Period of the event-loop lag probe |
@@ -904,7 +917,7 @@ results/
 | `soak` | 50 | 5 minutes | R1 |
 | `model_bench` | none | Batch time per model, batch size and thread count; decode and preprocess; dispatch round trip | Q1c, Q3, section 6.2 |
 
-Every scenario takes a topology (`single` or `split`), a phase mode (random by default, or aligned), a model set (real by default, `fake` with a fixed service time, or `null`) and overrides of the server config. The experiments of section 12 are these scenarios with one override each, except the FIFO control, which also turns the skip rule off: the configuration refuses the skip rule on a queue.
+Every scenario takes a topology (`single` or `split`), a phase mode (random by default, or aligned), a model set (real by default, `fake` with a fixed service time, or `null`) and overrides of the server config. The experiments of section 12 are these scenarios with one override each, except the FIFO control, which also turns the skip rule off: the configuration refuses the skip rule on a queue. Overrides reach the gateway and its workers through the environment variable `RRI_OVERRIDES`, a JSON object over the defaults; the topology comes from `RRI_TOPOLOGY`, which each compose file sets. A run with changed settings starts a fresh container with them, and `/metrics` echoes the effective configuration.
 
 ### 11.3 Files written by one run
 
@@ -916,7 +929,7 @@ Every scenario takes a topology (`single` or `split`), a phase mode (random by d
 | `scrapes.jsonl` | yes | One line per second: time since run start, the full `/metrics` object, and a `fleet` object with the `processes` fields for the robot fleet and, in the `split` topology, the `cgroup` fields of the robots' container. |
 | `events.jsonl` | yes | One line per event with its time since run start: `server_ready`, `robot_start`, `robot_join`, `robot_kill`, `robot_stop`, `fault`, `scenario_end`. |
 | `summary.json` | yes | Everything aggregation needs, below. |
-| `samples/robot_<id>.npz` | no | Per command: model, frame number, capture time, send time, receive time, accepted or the reject reason, batch size, every stage duration. Per tick: scheduled time, actual send time, whether the frame was sent. |
+| `samples/robot_<id>.npz` | no | Per command: session, model, frame number, capture time, send time, receive time, gateway result time, applied or the reject reason, batch size, every stage duration. Per tick: frame number, scheduled time, actual send time, and the outcome: sent, skipped because the previous frame was unsent, or passed because the simulator woke late. A robot killed with SIGKILL leaves no file. |
 | `DONE` | yes | Empty. Written last, so an interrupted run is recognizable. |
 
 `summary.json`:
@@ -943,7 +956,7 @@ Key form: `<scenario>.<subject>.<metric>`, with an optional window or robot-coun
 | Family | Keys |
 |---|---|
 | Steady | `steady.<m>.freshness_ms.{p50,p95,p99,max}`, `steady.<m>.commands_per_s`, `steady.<m>.commands_received`, `steady.<m>.stale_count`, `steady.<m>.stale_ratio`, `steady.<m>.out_of_order_count`, `steady.<m>.freshness_trend_ms_per_s`, `steady.<m>.command_age_peak_ms.p95` |
-| Late joiner | `late_joiner.{before,after}.{a,b}.<m>.commands_per_s`, `late_joiner.{before,after}.{a,b}.<m>.freshness_ms.p95`, `late_joiner.<m>.settle_s` |
+| Late joiner | `late_joiner.{before.a,after.a,after.b}.<m>.commands_per_s`, `late_joiner.{before.a,after.a,after.b}.<m>.freshness_ms.p95`, `late_joiner.<m>.settle_s` |
 | Sweep | `sweep.n{1,3,5,10}.<m>.commands_per_s_per_robot.{min,mean,max}`, `sweep.n{1,3,5,10}.<m>.freshness_ms.{p50,p95}`, `sweep.n{1,3,5,10}.<m>.batch_size.{mean,share_1}`, `sweep.n{1,3,5,10}.<m>.utilization`, `sweep.n{1,3,5,10}.cpu.{utilization,throttled_ms_per_s}`, `sweep.<m>.capacity_fps`, `sweep.<m>.inflection_n` |
 | Breakdown | `sweep.n5.<m>.stage.<stage>_ms.{mean,p50,p95}` for the ten stages of section 7, `sweep.n5.<m>.stage_sum_ms.mean`, `sweep.n5.<m>.e2e_ms.mean`, `sweep.n5.<m>.residual_ms.mean` |
 | Disconnect | `disconnect.{before,after}.survivors.<m>.commands_per_s_per_robot`, `disconnect.{before,after}.survivors.<m>.freshness_ms.p95`, `disconnect.<m>.recovery_s`, `disconnect.detect_ms` |
@@ -1005,15 +1018,21 @@ Each optimization or control is a candidate with a stated hypothesis, one main m
 - **Nothing in this skeleton is measured.** Every placeholder is open.
 - **TLS.** Not built and its cost is not measured. The design assumes it ends at a load balancer.
 - **Authentication.** A shared-token check exists as a hook. Real authentication is not built.
+- **Fresh robot ids.** A robot id that has never been served goes first once (section 6.1), and ids are not authenticated (A21, A22). A client that connects under a new id each time is therefore served ahead of the others each time. The fairness properties of section 6.1 hold per robot id.
 - **Wide-area networks.** All runs are on one host. Delay and jitter are injected by a link model in the simulator. Real WAN behaviour is not measured.
-- **Packet loss.** Measured only if the test kernel supports `tc netem`. Otherwise head-of-line blocking is argued, not measured.
+- **Packet loss.** Measured only if a loss run is made: it needs `tc netem` in the kernel, iproute2 in the image, and a robots container that runs as root with NET_ADMIN, which the default image and compose files do not give. Otherwise head-of-line blocking is argued, not measured.
 - **Bandwidth saved by dropping frames at the source.** On a real uplink this is derived from frame size and rate, not measured. Bytes per second on loopback are measured if that experiment runs.
 - **QUIC or datagram transport.** Not built.
 - **Real cameras and real robots.** Frames are synthetic and pre-encoded. Commands drive a simulated state.
 - **Model accuracy.** Commands are derived from model outputs on synthetic frames. Whether they are good commands is not evaluated.
-- **Hardware dependence.** Every number belongs to the machine it was measured on. The inflection point is explained as utilization for that reason. The development machine mixes fast and slow cores and does not pin virtual CPUs, so results are repeated and reported with their spread.
+- **Hardware dependence.** Every number belongs to the machine it was measured on. The inflection point is explained as utilization for that reason. The development machine mixes fast and slow cores and does not pin virtual CPUs, so results are repeated and reported with their spread. The I/O cost per frame that the pacing share reserves is a configured value measured on the test machine.
 - **Co-located simulator.** In the `single` topology the simulator competes with the system under test. Fire lag flags runs where the simulator fell behind, and the `split` topology shows the difference.
 - **Shared clock.** The latency breakdown relies on all processes sharing one monotonic clock. Across machines only robot-clock freshness and server dwell time are valid.
+- **Timer resolution.** The event loop's timers have a resolution of 1 ms. A pacing release, a robot's tick and the loop-lag probe can be late by up to a millisecond, and the ping round trip is known to the millisecond, so on one host it is usually reported as null.
+- **Connections before HTTP.** A connection that never sends its HTTP request is bounded in time by the handshake timeout but not in number (section 4.3: in production a load balancer sits in front of the gateway and bounds them).
+- **Slow-consumer detection.** A robot that stops reading is found only after the kernel buffers of both ends have filled with commands, so the time to find it depends on those buffer sizes and on the command rate.
+- **Fake models.** The fake and null models use almost no CPU, so the feed-forward pacing share does not engage in runs with them.
+- **Skip rule.** On the test machine depth's margin is positive, so the skip rule's condition is not met at 30 fps and the runs do not exercise it; `frames_skipped` in each run's `/metrics` shows whether it fired. It is covered by unit and property tests only.
 - **Server-side percentiles** come from log-bucket histograms with about 9% resolution. Exact percentiles come from robot-side samples.
 - **Per-process memory.** `processes.<p>.rss_bytes` is the kernel's approximate per-process counter from `/proc/<pid>/stat`. The leak check uses the cgroup's anonymous plus socket memory instead.
 - **Damaged frames.** A frame whose image data is damaged but still decodes is served, and its command is computed from the pixels the decoder recovered. For such a frame the JPEG decoder writes one line to the worker's standard error, which cannot be switched off through OpenCV, so the container's log size is capped.
@@ -1039,10 +1058,12 @@ The interface below is planned. The README will carry the final commands.
 docker compose build                                       # downloads both models and verifies their sha256
 docker compose up                                          # gateway and workers, limited to 2 CPUs and 4 GB; /metrics on port 8080
 docker compose exec system python -m bench.run steady      # robots in the same container, against the running service
+docker compose exec system python -m robot.fleet --robots 3 --duration-s 30    # robots by hand, without the runner
 docker compose run --rm system pytest -q                   # the tests, inside the image
 make evidence                                              # every scenario, repeated, one fresh container per run; skips finished runs
 make report                                                # aggregate, plot, render this document, check its numbers
-docker compose -f docker-compose.split.yml up              # the split topology
+docker compose -f docker-compose.split.yml up              # the split topology: the service alone
+docker compose -f docker-compose.split.yml run --rm robots python -m robot.fleet --url ws://system:8080/ws --robots 3 --duration-s 30
 ```
 
 How a number reaches this document: a gated run writes `results/raw/<scenario>/<run>/summary.json`; aggregation writes `results/summary/facts.json`; rendering fills the placeholders; a check fails if a number here is neither a rendered fact nor a declared design constant.

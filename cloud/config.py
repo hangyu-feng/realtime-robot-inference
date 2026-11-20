@@ -2,17 +2,20 @@
 
 A value is checked once, when the configuration is built at startup. A bad value
 raises ConfigError there, naming the field, and everything downstream trusts the
-values and the cross-field rules checked here.
+values and the cross-field rules checked here. load_config builds the configuration
+from the environment, which it validates as untrusted input.
 """
 
 from __future__ import annotations
 
+import json
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from fractions import Fraction
-from types import MappingProxyType
+from types import MappingProxyType, NoneType, UnionType
+from typing import Any, get_args, get_origin, get_type_hints
 
 from common.commands import MODEL_KEYS
 from common.errors import ConfigError
@@ -28,6 +31,19 @@ _NS_PER_S = 1_000_000_000
 # readings of the monotonic clock, which the wire carries as an i64. Within that range, about
 # 292 years, the conversion is a finite integer that the type holds.
 _MAX_DURATION_NS = 2**63 - 1
+# The event loop times a wait in whole milliseconds and runs one below half a millisecond at
+# once, so a shorter wait would not be the one configured. From this floor up a wait is at
+# least 1 000 000 ns after conversion, which the code that takes one relies on.
+_MIN_WAIT_NS = 1_000_000
+# A whole-number setting may be handed to C as an int: a socket option, an option of the
+# runtime, a count of iterations.
+_MAX_COUNT = 2**31 - 1
+# ONNX Runtime starts one OS thread per intra-op thread when it builds the session, so the
+# count is bounded, above the logical CPUs of any host this runs on.
+_MAX_THREADS = 64
+# The pacing hold divides a batch's CPU time by the paced worker's share. A share near zero
+# makes the hold's deadline too large for the float division of the wait for it.
+_MIN_PACING_SHARE_CORES = 0.01
 
 
 class QueuePolicy(StrEnum):
@@ -69,6 +85,11 @@ def _require_positive(name: str, value: float) -> None:
     _require(_finite(name, value) > 0, f"{name} must be above 0")
 
 
+def _require_wait(name: str, value: float, ns_per_unit: int) -> None:
+    minimum = _MIN_WAIT_NS / ns_per_unit
+    _require(_finite(name, value) >= minimum, f"{name} must be at least {minimum:g}")
+
+
 def _require_not_negative(name: str, value: float) -> None:
     _require(_finite(name, value) >= 0, f"{name} must be 0 or more")
 
@@ -104,8 +125,8 @@ class ModelConfig:
     fake_frame_ms: float = 0.0
 
     def __post_init__(self) -> None:
-        _require_positive("stale_ms", self.stale_ms)
-        _require_positive("watchdog_ms", self.watchdog_ms)
+        _require_wait("stale_ms", self.stale_ms, _NS_PER_MS)
+        _require_wait("watchdog_ms", self.watchdog_ms, _NS_PER_MS)
         _require_not_negative("fake_frame_ms", self.fake_frame_ms)
         _require_duration("stale_ms", self.stale_ms, _NS_PER_MS)
         _require_duration("watchdog_ms", self.watchdog_ms, _NS_PER_MS)
@@ -114,6 +135,7 @@ class ModelConfig:
         # watchdog limit it could be applied already expired.
         _require(self.watchdog_ms >= self.stale_ms, "watchdog_ms must be at least stale_ms")
         _require(self.threads >= 0, "threads must be 0 (the runtime's default) or more")
+        _require(self.threads <= _MAX_THREADS, f"threads must be at most {_MAX_THREADS}")
         _require(
             len(self.batch_sizes) > 0
             and self.batch_sizes[0] == 1
@@ -146,11 +168,11 @@ def _default_models() -> dict[str, ModelConfig]:
 
 
 # Fields that must be finite and above 0, and fields that must be finite and not negative.
-_POSITIVE_FIELDS = (
+_POSITIVE_FIELDS = ("ingress_max_messages_per_s", "ingress_max_bytes_per_s")
+_NOT_NEGATIVE_FIELDS = ("overhead_allowance_ms", "pacing_headroom_cores", "io_cpu_ms_per_frame")
+# Waits and thresholds, which must be at least 1 ms.
+_WAIT_FIELDS = (
     "skip_max_unserved_ms",
-    "pacing_min_share_cores",
-    "ingress_max_messages_per_s",
-    "ingress_max_bytes_per_s",
     "ingress_burst_s",
     "max_frame_age_ms",
     "handshake_timeout_ms",
@@ -159,11 +181,15 @@ _POSITIVE_FIELDS = (
     "slow_consumer_timeout_ms",
     "warmup_timeout_ms",
     "shutdown_grace_ms",
+    "close_timeout_ms",
+    "ping_timeout_ms",
+    "worker_stop_timeout_ms",
+    "worker_restart_min_ms",
+    "worker_restart_max_ms",
     "ping_interval_ms",
     "robot_retention_s",
     "loop_probe_ms",
 )
-_NOT_NEGATIVE_FIELDS = ("overhead_allowance_ms", "pacing_headroom_cores", "io_cpu_ms_per_frame")
 # Durations, with the nanoseconds in their unit.
 _DURATION_FIELDS = {
     "skip_max_unserved_ms": _NS_PER_MS,
@@ -177,17 +203,24 @@ _DURATION_FIELDS = {
     "slow_consumer_timeout_ms": _NS_PER_MS,
     "warmup_timeout_ms": _NS_PER_MS,
     "shutdown_grace_ms": _NS_PER_MS,
+    "close_timeout_ms": _NS_PER_MS,
+    "ping_timeout_ms": _NS_PER_MS,
+    "worker_stop_timeout_ms": _NS_PER_MS,
+    "worker_restart_min_ms": _NS_PER_MS,
+    "worker_restart_max_ms": _NS_PER_MS,
     "ping_interval_ms": _NS_PER_MS,
     "robot_retention_s": _NS_PER_S,
     "loop_probe_ms": _NS_PER_MS,
 }
-# Whole numbers that must be at least 1.
+# Whole numbers that must be from 1 to _MAX_COUNT.
 _COUNT_FIELDS = (
     "fifo_capacity_frames",
     "max_connections",
     "max_message_bytes",
     "socket_rcvbuf_bytes",
     "socket_sndbuf_bytes",
+    "receive_queue_frames",
+    "calibration_runs",
     "downlink_queue_commands",
     "max_robot_entries",
 )
@@ -225,9 +258,13 @@ class ServerConfig:
     overhead_allowance_ms: float = 10.0
     models: Mapping[str, ModelConfig] = field(default_factory=_default_models)
 
-    # Workers run below the gateway and the simulator, so under a cpuset limit, where the
-    # kernel does not freeze the container, the I/O processes preempt them (DESIGN.md 6.4).
-    worker_nice: int = 10
+    # How far the workers raise their niceness; 0 leaves them at the priority of the gateway
+    # and the simulator. Under the CPU quota niceness has no effect: on a host with more CPUs
+    # than the quota every thread has a CPU to itself. On a two-CPU cpuset it lets the I/O
+    # processes preempt the workers, but a worker at nice 10 has a weight of 110 against
+    # 1024, so a depth batch that shares its CPU with a busy process stretches about tenfold.
+    # So the lower priority is off by default (DESIGN.md 6.4).
+    worker_nice: int = 0
     # Quota kept unassigned by the feed-forward pacing share. The quota is enforced per
     # 100 ms period, and the predicted demand of the other consumers comes from declared
     # frame rates, calibrated worker costs and a configured I/O cost, so 10 ms per period
@@ -239,9 +276,10 @@ class ServerConfig:
     # CPU time per frame of everything outside the workers that runs under the quota: the
     # gateway and, in the single topology, the robot fleet. The pacing share reserves it,
     # so a value below the real cost lets the container's demand pass the quota, and the
-    # kernel then freezes every process in it: err high. The default is a placeholder until
-    # a gated run of bench.transport_bench sets it for the hardware the gateway runs on.
-    # The capacity model reads its value from its input file.
+    # kernel then freezes every process in it: err high, at or above the cost per frame of a
+    # run with both workers busy. The capacity model computes the share from this
+    # field, as the gateway does, and takes the measured cost of its input file only for its
+    # predicted CPU demand.
     io_cpu_ms_per_frame: float = 0.15
 
     # A safety valve, not the main mechanism (DESIGN.md 8.1).
@@ -272,13 +310,38 @@ class ServerConfig:
     slow_consumer_timeout_ms: float = 1_000.0
     warmup_timeout_ms: float = 120_000.0
     shutdown_grace_ms: float = 2_000.0
+    # The library's close waits for its close frame to drain before its own timeout starts,
+    # so behind a send buffer that does not drain it could wait for ever. After this long
+    # the connection is aborted.
+    close_timeout_ms: float = 1_000.0
+    # The library sends no new ping while it waits for a pong, so at most one ping is
+    # outstanding per connection. Well above the idle timeout, so that a frozen robot is
+    # always closed as an idle timeout and never as a failed ping.
+    ping_timeout_ms: float = 30_000.0
+    # A worker whose link has closed gets this long to exit before it is killed.
+    worker_stop_timeout_ms: float = 2_000.0
+    # The pause before a restart attempt doubles from the minimum to the maximum, with
+    # jitter, and starts again from the minimum after a successful warm-up.
+    worker_restart_min_ms: float = 500.0
+    worker_restart_max_ms: float = 10_000.0
+    # Timed runs per batch size at warm-up, after one untimed run that grows the runtime's
+    # memory arena. Their median is the calibrated time.
+    calibration_runs: int = 3
 
     # Linux doubles a requested size for its own bookkeeping, and a loopback segment can
     # carry a whole frame past TCP_NOTSENT_LOWAT, so the buffer sizes are what bound a
     # stalled path. With frames of about 40 KB, 40 KiB requested here and at the robot
     # leaves about two frames on a path whose reader has stopped (DESIGN.md 5.1).
     socket_rcvbuf_bytes: int = 40_960
-    socket_sndbuf_bytes: int = 40_960
+    # The gateway sends only commands, each under 100 bytes, so a few kilobytes fill soon
+    # after a robot stops reading, and the slow-consumer timeout can start. A buffer of
+    # about two frames would hide hundreds of commands in the kernel (DESIGN.md 5.1).
+    # Linux doubles the request.
+    socket_sndbuf_bytes: int = 4096
+    # The library's receive queue high-water mark, in frames: above it the library stops
+    # reading the socket. The reader drains the queue in one loop pass, so the queue holds
+    # frames only while the loop is busy elsewhere.
+    receive_queue_frames: int = 4
     # Commands of both models waiting for one robot's connection. The oldest is dropped
     # when it is full: a newer command of a model supersedes an older one, and a robot
     # whose queue fills is not reading, which the slow-consumer timeout then ends.
@@ -295,13 +358,24 @@ class ServerConfig:
         object.__setattr__(self, "models", MappingProxyType(dict(self.models)))
         for name in _POSITIVE_FIELDS:
             _require_positive(name, getattr(self, name))
+        for name in _WAIT_FIELDS:
+            _require_wait(name, getattr(self, name), _DURATION_FIELDS[name])
         for name in _NOT_NEGATIVE_FIELDS:
             _require_not_negative(name, getattr(self, name))
         for name, ns_per_unit in _DURATION_FIELDS.items():
             _require_duration(name, getattr(self, name), ns_per_unit)
+        _require(
+            _finite("pacing_min_share_cores", self.pacing_min_share_cores)
+            >= _MIN_PACING_SHARE_CORES,
+            f"pacing_min_share_cores must be at least {_MIN_PACING_SHARE_CORES}",
+        )
         for name in _COUNT_FIELDS:
-            _require(getattr(self, name) >= 1, f"{name} must be at least 1")
-        _require(1 <= self.port <= _MAX_PORT, f"port must be between 1 and {_MAX_PORT}")
+            _require(
+                1 <= getattr(self, name) <= _MAX_COUNT, f"{name} must be from 1 to {_MAX_COUNT}"
+            )
+        # Port 0 lets the kernel choose a free port, which tests use; the gateway prints the
+        # port it bound.
+        _require(0 <= self.port <= _MAX_PORT, f"port must be between 0 and {_MAX_PORT}")
         _require(
             0 <= self.worker_nice <= _MAX_NICE, f"worker_nice must be between 0 and {_MAX_NICE}"
         )
@@ -340,6 +414,16 @@ class ServerConfig:
         _require(
             self.queue_policy is QueuePolicy.LATEST or not self.skip_rule,
             "queue_policy fifo needs skip_rule off",
+        )
+        # The reader's idle deadline fires between 1 and 1.25 idle timeouts after the last
+        # message; twice leaves a margin, so a frozen robot ends as an idle timeout.
+        _require(
+            self.ping_timeout_ms >= 2 * self.idle_timeout_ms,
+            "ping_timeout_ms must be at least twice idle_timeout_ms",
+        )
+        _require(
+            self.worker_restart_max_ms >= self.worker_restart_min_ms,
+            "worker_restart_max_ms must be at least worker_restart_min_ms",
         )
         # Only disconnected robots are dropped from the robot table, so it must have room
         # for every open connection.
@@ -421,14 +505,149 @@ def config_echo(config: ServerConfig, *, version: str, protocol_version: int) ->
             "slow_consumer": config.slow_consumer_timeout_ms,
             "warmup": config.warmup_timeout_ms,
             "shutdown_grace": config.shutdown_grace_ms,
+            "close": config.close_timeout_ms,
+            "ping": config.ping_timeout_ms,
+            "worker_stop": config.worker_stop_timeout_ms,
         },
         "socket": {
             "rcvbuf_bytes": config.socket_rcvbuf_bytes,
             "sndbuf_bytes": config.socket_sndbuf_bytes,
         },
+        "receive_queue_frames": config.receive_queue_frames,
         "downlink_queue_commands": config.downlink_queue_commands,
+        "calibration_runs": config.calibration_runs,
+        "worker_restart_ms": {
+            "min": config.worker_restart_min_ms,
+            "max": config.worker_restart_max_ms,
+        },
         "ping_interval_ms": config.ping_interval_ms,
         "robot_retention_s": config.robot_retention_s,
         "max_robot_entries": config.max_robot_entries,
         "loop_probe_ms": config.loop_probe_ms,
     }
+
+
+TOPOLOGY_VARIABLE = "RRI_TOPOLOGY"
+OVERRIDES_VARIABLE = "RRI_OVERRIDES"
+
+_SERVER_TYPES = get_type_hints(ServerConfig)
+_MODEL_TYPES = get_type_hints(ModelConfig)
+
+
+def load_config(environ: Mapping[str, str]) -> ServerConfig:
+    """Build the configuration from the environment: the defaults, the topology and the overrides.
+
+    The gateway and each of its workers call this, and a worker inherits the gateway's
+    environment, so both run with the same settings. RRI_TOPOLOGY, absent or empty for the
+    default, names the topology. RRI_OVERRIDES, absent or blank for none, is a JSON object of
+    ServerConfig fields merged over the defaults; its models entry maps a model key to an
+    object of ModelConfig fields merged over that model's defaults. Every cross-field rule
+    applies to the merged result.
+    """
+    default = ServerConfig()
+    # Typed Any: dataclasses.replace takes settings of every field type.
+    changes: dict[str, Any] = {}
+    topology = environ.get(TOPOLOGY_VARIABLE, "")
+    if topology:
+        try:
+            changes["topology"] = Topology(topology)
+        except ValueError as error:
+            raise ConfigError(
+                f"{TOPOLOGY_VARIABLE} must be one of {', '.join(Topology)}"
+            ) from error
+    try:
+        changes.update(_read_overrides(environ.get(OVERRIDES_VARIABLE, ""), default.models))
+        return replace(default, **changes)
+    except ConfigError as error:
+        raise ConfigError(f"{OVERRIDES_VARIABLE}: {error}") from error
+
+
+def _read_overrides(text: str, default_models: Mapping[str, ModelConfig]) -> dict[str, Any]:
+    if not text.strip():
+        return {}
+    try:
+        document = json.loads(text)
+    except (ValueError, RecursionError) as error:
+        # A JSONDecodeError is a ValueError, as is an integer of more digits than int()
+        # converts; nesting deeper than the interpreter's recursion limit raises RecursionError.
+        raise ConfigError(f"not valid JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise ConfigError("must be a JSON object")
+    changes: dict[str, Any] = {}
+    for name, value in document.items():
+        # One source per setting: the compose file states the topology.
+        if name == "topology":
+            raise ConfigError(f"topology is set by {TOPOLOGY_VARIABLE} only")
+        if name == "models":
+            changes[name] = _read_models(value, default_models)
+        elif name in _SERVER_TYPES:
+            changes[name] = _convert(value, _SERVER_TYPES[name], name)
+        else:
+            raise ConfigError(f"{name} is not a setting")
+    return changes
+
+
+def _read_models(
+    value: object, default_models: Mapping[str, ModelConfig]
+) -> dict[str, ModelConfig]:
+    if not isinstance(value, dict):
+        raise ConfigError("models must be an object keyed by model")
+    models = dict(default_models)
+    for key, entry in value.items():
+        path = f"models.{key}"
+        if key not in MODEL_KEYS:
+            raise ConfigError(f"{path} is not a model; the models are {', '.join(MODEL_KEYS)}")
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{path} must be an object")
+        changes: dict[str, Any] = {}
+        for name, setting in entry.items():
+            if name not in _MODEL_TYPES:
+                raise ConfigError(f"{path}.{name} is not a model setting")
+            changes[name] = _convert(setting, _MODEL_TYPES[name], f"{path}.{name}")
+        try:
+            models[key] = replace(models[key], **changes)
+        except ConfigError as error:
+            raise ConfigError(f"{path}: {error}") from error
+    return models
+
+
+def _is_integer(value: object) -> bool:
+    # bool is a subclass of int, and JSON true is not a number.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+# The JSON values each declared type other than an enum takes, and how a refusal names them.
+_JSON_TYPES: dict[object, tuple[str, Callable[[object], bool]]] = {
+    bool: ("true or false", lambda value: isinstance(value, bool)),
+    int: ("an integer", _is_integer),
+    float: ("a number", lambda value: _is_integer(value) or isinstance(value, float)),
+    str: ("a string", lambda value: isinstance(value, str)),
+    tuple[int, ...]: (
+        "a list of integers",
+        lambda value: isinstance(value, list) and all(map(_is_integer, value)),
+    ),
+}
+
+
+def _convert(value: object, declared: object, path: str) -> object:
+    """Return a JSON value as the declared type of the setting at path."""
+    if get_origin(declared) is UnionType:
+        if value is None:
+            return None
+        # Every optional setting is declared as one type or None.
+        (declared,) = (member for member in get_args(declared) if member is not NoneType)
+    if isinstance(declared, type) and issubclass(declared, StrEnum):
+        if isinstance(value, str) and value in {member.value for member in declared}:
+            return declared(value)
+        raise ConfigError(f"{path} must be one of {', '.join(declared)}")
+    description, accepts = _JSON_TYPES[declared]
+    if not accepts(value):
+        raise ConfigError(f"{path} must be {description}")
+    if isinstance(value, list):
+        return tuple(value)
+    if declared is float and isinstance(value, int):
+        try:
+            return float(value)
+        except OverflowError as error:
+            raise ConfigError(f"{path} must be a finite number") from error
+    return value

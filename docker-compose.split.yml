@@ -1,0 +1,56 @@
+# The split topology: the cloud alone in the container limited to 2 CPUs and
+# 4 GB, and the robots in a container of their own.
+# ASSUMPTION: A20. Both containers run on one host and read its one monotonic
+# clock, so the robots' timestamps and the gateway's can be compared.
+services:
+  system:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: realtime-robot-inference:dev
+    init: true
+    cpus: 2.0
+    mem_limit: 4g
+    memswap_limit: 4g # equal to mem_limit, so no swap
+    environment:
+      RRI_TOPOLOGY: split
+      # A JSON object of settings merged over the defaults; empty for none.
+      RRI_OVERRIDES: ${RRI_OVERRIDES:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./results:/app/results
+    # The gateway shuts down within shutdown_grace_ms + 2 * worker_stop_timeout_ms
+    # + close_timeout_ms, which is 7 s with the default settings.
+    stop_grace_period: 10s
+    # The JPEG decoder writes one line per damaged frame to standard error.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # No healthcheck: a probe process inside the container would be charged to
+    # the CPU quota being measured. Readiness is the "ready:" line and /healthz.
+
+  # Started on demand, with
+  # `docker compose -f docker-compose.split.yml run --rm robots python -m robot.fleet ...`.
+  # The profile keeps `up` from starting it.
+  robots:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: realtime-robot-inference:dev
+    init: true
+    # No CPU limit: this topology shows the cloud with the whole quota to itself,
+    # so the simulator must never be the bottleneck of a run.
+    mem_limit: 2g
+    memswap_limit: 2g # equal to mem_limit, so no swap
+    volumes:
+      - ./results:/app/results
+    depends_on: [system]
+    profiles: ["robots"]
+    # The image's own command starts a gateway, so a bare `run --rm robots`
+    # needs a command that does not.
+    command: ["python", "-m", "robot.fleet", "--url", "ws://system:8080/ws", "--robots", "1", "--duration-s", "30"]

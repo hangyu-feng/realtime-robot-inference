@@ -542,7 +542,7 @@ def test_the_skip_rule_counts_the_unserved_time_from_a_service_in_an_earlier_ses
     assert (type(decision), counters.frames_served, counters.frames_skipped) == outcome
 
 
-def test_a_skipped_robot_takes_no_place_in_the_batch_and_the_walk_moves_on() -> None:
+def test_a_doomed_frame_is_served_when_another_robot_has_a_pending_frame() -> None:
     world = World(replace(BASE, batch_cap=1, skip_rule=True))
     world.connect("a", 0)
     world.connect("b", 0)
@@ -551,21 +551,26 @@ def test_a_skipped_robot_takes_no_place_in_the_batch_and_the_walk_moves_on() -> 
 
     batch = world.dispatch(500)
 
-    assert served_ids(batch) == ["b"]
-    assert (world.counters("a").frames_skipped, world.counters("a").last_served_seq) == (1, None)
+    assert served_ids(batch) == ["a"]
+    assert world.counters("a").frames_skipped == 0
 
 
-def test_the_skip_rule_judges_a_frame_against_the_threshold_its_robot_declared() -> None:
+@pytest.mark.parametrize(
+    ("stale_ns", "outcome"),
+    [(STALE_NS, SKIPPED), (2 * STALE_NS, SERVED)],
+    ids=["strict", "lenient"],
+)
+def test_the_skip_rule_judges_a_frame_against_the_threshold_its_robot_declared(
+    stale_ns: int, outcome: tuple[type, int, int]
+) -> None:
     world = World(replace(BASE, skip_rule=True))
-    world.connect("strict", 0, stale_ns=STALE_NS)
-    world.connect("lenient", 0, stale_ns=2 * STALE_NS)
-    for robot_id in ("strict", "lenient"):
-        world.put(robot_id, 1, 500 - DOOMING_NS)
+    world.connect("a", 0, stale_ns=stale_ns)
+    world.put("a", 1, 500 - DOOMING_NS)
 
-    batch = world.dispatch(500)
+    decision = world.scheduler.next(500)
 
-    assert served_ids(batch) == ["lenient"]
-    assert world.counters("strict").frames_skipped == 1
+    counters = world.counters("a")
+    assert (type(decision), counters.frames_served, counters.frames_skipped) == outcome
 
 
 def test_pacing_holds_the_worker_until_the_cpu_time_over_the_share_has_passed() -> None:

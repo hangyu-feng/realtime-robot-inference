@@ -339,7 +339,11 @@ class ModelScheduler:
             if len(items) == self._config.batch_cap:
                 # A robot the walk does not reach keeps its frame pending.
                 break
-            if self._config.skip_rule and self._skips(record, now_ns):
+            # Only a robot that is alone in the queue is skipped: the worker then idles until
+            # the next frame arrives. With another robot pending, a skip would serve that robot
+            # out of turn, and the robot whose frames arrive just before each completion would
+            # be served again and again.
+            if self._config.skip_rule and len(robots) == 1 and self._skips(record, now_ns):
                 self._mailbox.skip(record.robot_id, model)
                 continue
             self._last_served_seq += 1

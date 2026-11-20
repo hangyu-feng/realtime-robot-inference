@@ -44,7 +44,7 @@ Python 3.14, checked by `ruff`, `mypy --strict` and `pytest`. These rules cover 
 
 - ALWAYS give every task an owner: start it in a `TaskGroup`, or keep a reference and handle its result.
 - NEVER swallow `CancelledError`. Clean up in `finally` and let it propagate.
-- ALWAYS set a timeout at the call site, with `asyncio.timeout()`.
+- ALWAYS set a timeout at the call site, with `asyncio.timeout()`, on every await that depends on a peer or another process. An await that this process itself completes (an Event, a task it owns) takes none and carries a comment naming what completes it.
 - NEVER block the event loop. Inference and image decoding run in the worker processes, and nothing on the frame path writes a file or sleeps.
 - ALWAYS bound every queue and buffer, and say in a comment what happens when it is full.
 - ALWAYS measure durations with the monotonic clock. NEVER subtract wall-clock times.

@@ -27,12 +27,23 @@ RUN python scripts/patch_midas.py \
 ENV OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1
 
-COPY . .
+# The service runs as a user that owns /app, where the tests write their caches.
+# The model files above stay root-owned and readable by everyone.
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin rri && chown rri:rri /app
 
-# ASSUMPTION: the container runs as root. Results are written to a bind mount,
-# and root avoids a user-id mismatch with whoever owns that directory on the host.
+COPY --chown=rri:rri . .
+
+# Set late, so a new commit rebuilds only the layers from here on.
+ARG GIT_COMMIT=unknown
+ENV RRI_VERSION=$GIT_COMMIT
+
+# Nothing here needs root: the port is unprivileged, a worker's niceness only
+# rises, the worker link is an inherited socket pair, and any user can read the
+# cgroup and /proc files. A process that writes under the bind-mounted
+# /app/results is started with the host user's ids (-u), because this user's id
+# need not match the directory's owner.
+USER rri
 
 EXPOSE 8080
 
-# Placeholder until the gateway exists: print the limits the container runs under.
-CMD ["python", "-m", "common.cgroup"]
+CMD ["python", "-m", "cloud.main"]
