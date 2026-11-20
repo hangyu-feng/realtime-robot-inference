@@ -528,7 +528,7 @@ The leak signal is anonymous plus socket memory. `memory.current` also counts pa
 
 ## 9. The five demos
 
-Each demo is a scenario of section 11.2, run several times as gated runs, in both topologies. The tables show the `single` topology. Predicted values are written before the first run.
+Each demo is a scenario of section 11.2, run several times as gated runs, in both topologies. The tables show the `single` topology. Predicted values are written before the first run. The predicted values below are preliminary: the capacity model (`bench/capacity_model.py`) computed them from the batch times of a container spike on the test machine, before the first end-to-end run, and the gated model benchmark will recompute them.
 
 ### 9.1 Freshness under steady load
 
@@ -536,15 +536,15 @@ Each demo is a scenario of section 11.2, run several times as gated runs, in bot
 - **Assertions.** Freshness shows no upward trend. The frame conservation identities hold.
 - **Evidence.** `steady_freshness.png` (freshness of every command against time, per model, with the thresholds marked), `steady.md`.
 
-| Quantity | `cls` predicted | `cls` measured | `depth` predicted | `depth` measured |
+| Quantity | `cls` predicted (preliminary) | `cls` measured | `depth` predicted (preliminary) | `depth` measured |
 |---|---|---|---|---|
-| Freshness p50 (ms) | `{{predict.steady.cls.freshness_ms.p50}}` | `{{steady.cls.freshness_ms.p50}}` | `{{predict.steady.depth.freshness_ms.p50}}` | `{{steady.depth.freshness_ms.p50}}` |
-| Freshness p95 (ms) | `{{predict.steady.cls.freshness_ms.p95}}` | `{{steady.cls.freshness_ms.p95}}` | `{{predict.steady.depth.freshness_ms.p95}}` | `{{steady.depth.freshness_ms.p95}}` |
-| Freshness p99 (ms) | `{{predict.steady.cls.freshness_ms.p99}}` | `{{steady.cls.freshness_ms.p99}}` | `{{predict.steady.depth.freshness_ms.p99}}` | `{{steady.depth.freshness_ms.p99}}` |
-| Freshness max (ms) | `{{predict.steady.cls.freshness_ms.max}}` | `{{steady.cls.freshness_ms.max}}` | `{{predict.steady.depth.freshness_ms.max}}` | `{{steady.depth.freshness_ms.max}}` |
-| Commands per second | `{{predict.steady.cls.commands_per_s}}` | `{{steady.cls.commands_per_s}}` | `{{predict.steady.depth.commands_per_s}}` | `{{steady.depth.commands_per_s}}` |
+| Freshness p50 (ms) | 3.03 | `{{steady.cls.freshness_ms.p50}}` | 84.3 | `{{steady.depth.freshness_ms.p50}}` |
+| Freshness p95 (ms) | 3.03 | `{{steady.cls.freshness_ms.p95}}` | 99.4 | `{{steady.depth.freshness_ms.p95}}` |
+| Freshness p99 (ms) | 3.03 | `{{steady.cls.freshness_ms.p99}}` | 101 | `{{steady.depth.freshness_ms.p99}}` |
+| Freshness max (ms) | 3.03 | `{{steady.cls.freshness_ms.max}}` | 101 | `{{steady.depth.freshness_ms.max}}` |
+| Commands per second | 30.0 | `{{steady.cls.commands_per_s}}` | 14.8 | `{{steady.depth.commands_per_s}}` |
 | Freshness trend (ms per s) | 0 | `{{steady.cls.freshness_trend_ms_per_s}}` | 0 | `{{steady.depth.freshness_trend_ms_per_s}}` |
-| Peak command age p95 (ms) | `{{predict.steady.cls.command_age_peak_ms.p95}}` | `{{steady.cls.command_age_peak_ms.p95}}` | `{{predict.steady.depth.command_age_peak_ms.p95}}` | `{{steady.depth.command_age_peak_ms.p95}}` |
+| Peak command age p95 (ms) | 36.4 | `{{steady.cls.command_age_peak_ms.p95}}` | 167 | `{{steady.depth.command_age_peak_ms.p95}}` |
 
 ### 9.2 Late joiner
 
@@ -557,7 +557,7 @@ Each demo is a scenario of section 11.2, run several times as gated runs, in bot
 | A | before, 0 to 10 s | `{{late_joiner.before.a.cls.commands_per_s}}` | `{{late_joiner.before.a.cls.freshness_ms.p95}}` | `{{late_joiner.before.a.depth.commands_per_s}}` | `{{late_joiner.before.a.depth.freshness_ms.p95}}` |
 | A | after, 10 to 30 s | `{{late_joiner.after.a.cls.commands_per_s}}` | `{{late_joiner.after.a.cls.freshness_ms.p95}}` | `{{late_joiner.after.a.depth.commands_per_s}}` | `{{late_joiner.after.a.depth.freshness_ms.p95}}` |
 | B | after, 10 to 30 s | `{{late_joiner.after.b.cls.commands_per_s}}` | `{{late_joiner.after.b.cls.freshness_ms.p95}}` | `{{late_joiner.after.b.depth.commands_per_s}}` | `{{late_joiner.after.b.depth.freshness_ms.p95}}` |
-| A, predicted | after | `{{predict.late_joiner.after.a.cls.commands_per_s}}` | | `{{predict.late_joiner.after.a.depth.commands_per_s}}` | |
+| A, predicted (preliminary) | after | 30.0 | | 7.40 | |
 
 Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}` s.
 
@@ -567,12 +567,12 @@ Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}
 - **Assertions.** The conservation identities hold. Per-robot rates within one run are equal on each model, within run-to-run spread.
 - **Evidence.** `sweep_throughput.png`, `sweep_freshness.png`, `sweep_batch_size.png`, `sweep_cpu.png`, each with the predicted curve drawn in; `sweep.md`. The inflection point is discussed in section 6.5.
 
-| Robots | `cls` commands/s per robot (predicted / measured) | `cls` freshness p50 / p95 (ms) | `depth` commands/s per robot (predicted / measured) | `depth` freshness p50 / p95 (ms) |
+| Robots | `cls` commands/s per robot (predicted, preliminary / measured) | `cls` freshness p50 / p95 (ms) | `depth` commands/s per robot (predicted, preliminary / measured) | `depth` freshness p50 / p95 (ms) |
 |---|---|---|---|---|
-| 1 | `{{predict.sweep.n1.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n1.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n1.cls.freshness_ms.p50}}` / `{{sweep.n1.cls.freshness_ms.p95}}` | `{{predict.sweep.n1.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n1.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n1.depth.freshness_ms.p50}}` / `{{sweep.n1.depth.freshness_ms.p95}}` |
-| 3 | `{{predict.sweep.n3.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n3.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n3.cls.freshness_ms.p50}}` / `{{sweep.n3.cls.freshness_ms.p95}}` | `{{predict.sweep.n3.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n3.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n3.depth.freshness_ms.p50}}` / `{{sweep.n3.depth.freshness_ms.p95}}` |
-| 5 | `{{predict.sweep.n5.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n5.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n5.cls.freshness_ms.p50}}` / `{{sweep.n5.cls.freshness_ms.p95}}` | `{{predict.sweep.n5.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n5.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n5.depth.freshness_ms.p50}}` / `{{sweep.n5.depth.freshness_ms.p95}}` |
-| 10 | `{{predict.sweep.n10.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n10.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n10.cls.freshness_ms.p50}}` / `{{sweep.n10.cls.freshness_ms.p95}}` | `{{predict.sweep.n10.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n10.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n10.depth.freshness_ms.p50}}` / `{{sweep.n10.depth.freshness_ms.p95}}` |
+| 1 | 30.0 / `{{sweep.n1.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n1.cls.freshness_ms.p50}}` / `{{sweep.n1.cls.freshness_ms.p95}}` | 14.8 / `{{sweep.n1.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n1.depth.freshness_ms.p50}}` / `{{sweep.n1.depth.freshness_ms.p95}}` |
+| 3 | 30.0 / `{{sweep.n3.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n3.cls.freshness_ms.p50}}` / `{{sweep.n3.cls.freshness_ms.p95}}` | 4.92 / `{{sweep.n3.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n3.depth.freshness_ms.p50}}` / `{{sweep.n3.depth.freshness_ms.p95}}` |
+| 5 | 30.0 / `{{sweep.n5.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n5.cls.freshness_ms.p50}}` / `{{sweep.n5.cls.freshness_ms.p95}}` | 2.95 / `{{sweep.n5.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n5.depth.freshness_ms.p50}}` / `{{sweep.n5.depth.freshness_ms.p95}}` |
+| 10 | 30.0 / `{{sweep.n10.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n10.cls.freshness_ms.p50}}` / `{{sweep.n10.cls.freshness_ms.p95}}` | 1.48 / `{{sweep.n10.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n10.depth.freshness_ms.p50}}` / `{{sweep.n10.depth.freshness_ms.p95}}` |
 
 | Robots | `cls` mean batch size | `cls` share of batches of 1 | `depth` mean batch size | CPU utilization (of 2 CPUs) | Throttled (ms per s) |
 |---|---|---|---|---|---|
@@ -593,7 +593,7 @@ Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}
 | Survivors' `cls` commands/s per robot | `{{disconnect.before.survivors.cls.commands_per_s_per_robot}}` | `{{disconnect.after.survivors.cls.commands_per_s_per_robot}}` |
 | Survivors' `depth` p95 freshness (ms) | `{{disconnect.before.survivors.depth.freshness_ms.p95}}` | `{{disconnect.after.survivors.depth.freshness_ms.p95}}` |
 | Survivors' `cls` p95 freshness (ms) | `{{disconnect.before.survivors.cls.freshness_ms.p95}}` | `{{disconnect.after.survivors.cls.freshness_ms.p95}}` |
-| Predicted survivors' `depth` commands/s per robot | `{{predict.disconnect.before.survivors.depth.commands_per_s_per_robot}}` | `{{predict.disconnect.after.survivors.depth.commands_per_s_per_robot}}` |
+| Predicted survivors' `depth` commands/s per robot (preliminary) | 4.93 | 7.40 |
 
 Time from the kill until the server closes the connection: `{{disconnect.detect_ms}}` ms. Time until the survivors' depth rate settles: `{{disconnect.depth.recovery_s}}` s.
 
@@ -606,7 +606,7 @@ Time from the kill until the server closes the connection: `{{disconnect.detect_
 | Quantity | `cls` | `depth` |
 |---|---|---|
 | Commands/s per robot, min / mean / max | `{{massive.cls.commands_per_s_per_robot.min}}` / `{{massive.cls.commands_per_s_per_robot.mean}}` / `{{massive.cls.commands_per_s_per_robot.max}}` | `{{massive.depth.commands_per_s_per_robot.min}}` / `{{massive.depth.commands_per_s_per_robot.mean}}` / `{{massive.depth.commands_per_s_per_robot.max}}` |
-| Predicted commands/s per robot | `{{predict.massive.cls.commands_per_s_per_robot.mean}}` | `{{predict.massive.depth.commands_per_s_per_robot.mean}}` |
+| Predicted commands/s per robot (preliminary) | 8.60 | 0.199 |
 | Lowest over mean rate | `{{massive.cls.fairness.min_over_mean}}` | `{{massive.depth.fairness.min_over_mean}}` |
 | Jain index | `{{massive.cls.fairness.jain}}` | `{{massive.depth.fairness.jain}}` |
 | Longest command gap (ms), measured / bound | `{{massive.cls.command_gap_ms.max}}` / `{{massive.cls.command_gap_bound_ms}}` | `{{massive.depth.command_gap_ms.max}}` / `{{massive.depth.command_gap_bound_ms}}` |
