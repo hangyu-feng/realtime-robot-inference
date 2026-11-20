@@ -47,6 +47,9 @@ OVERHEADS = Overheads(
     dispatch_result_ns=NS_PER_MS // 2,
     deliver_ns=2 * NS_PER_MS,
 )
+# The measured cost of the frame I/O is not the configured 0.15 ms per frame, so that a run
+# shows which of the two a value takes.
+IO_CPU_MS_PER_FRAME = 0.4
 
 
 def linear_table(wall_ms: float, cpu_ms: float) -> ServiceTable:
@@ -95,6 +98,7 @@ class Case:
     quota_cores: float | None = QUOTA_CORES
     phase_mode: PhaseMode = PhaseMode.RANDOM
     overheads: Overheads = OVERHEADS
+    io_cpu_ms_per_frame: float = IO_CPU_MS_PER_FRAME
 
 
 DEMOS = {
@@ -179,6 +183,7 @@ def simulate_case(case: Case, seed: int) -> SimulationResult:
         case.scenario,
         case.tables,
         case.overheads,
+        case.io_cpu_ms_per_frame,
         case.quota_cores,
         case.phase_mode,
         seed,
@@ -451,8 +456,19 @@ def test_a_model_run_books_the_batches_wall_time_as_busy_and_the_waits_for_frame
 
 def test_the_predicted_demand_is_the_workers_cpu_time_and_the_frame_io_over_the_run() -> None:
     # One robot sends 750 frames, each served alone by each model at 1.5 ms of CPU time, and
-    # each costs 0.15 ms of frame I/O: 2.3625 s of CPU time over 30 s.
-    assert run("fast").cpu_demand_cores == pytest.approx(2.3625 / 30)
+    # each costs the measured 0.4 ms of frame I/O: 2.55 s of CPU time over 30 s.
+    assert run("fast").cpu_demand_cores == pytest.approx(2.55 / 30)
+
+
+def test_the_measured_io_cost_moves_the_predicted_demand_and_nothing_else() -> None:
+    # Depth is paced from the second robot on, so a share computed from the measured cost would
+    # move its batches.
+    with_cost = run("paced")
+
+    without_cost = simulate_case(replace(CASES["paced"], io_cpu_ms_per_frame=0.0), SEED)
+
+    assert replace(without_cost, cpu_demand_cores=with_cost.cpu_demand_cores) == with_cost
+    assert without_cost.cpu_demand_cores < with_cost.cpu_demand_cores
 
 
 @pytest.mark.parametrize("model", MODEL_KEYS)
@@ -573,9 +589,10 @@ def test_the_skip_rule_counts_a_frames_uplink_twice_in_its_age() -> None:
 
 def test_the_paced_model_gets_the_share_the_gateway_derives_after_every_start_and_stop() -> None:
     # Each robot offers 30 frames per second, at 15 ms of classifier CPU time and 0.15 ms of
-    # frame I/O each. With one robot depth may use its whole thread. With two, it gets what the
-    # classifier and the frame I/O leave of the 1.9 cores that the quota keeps after the
-    # headroom; from three on, the classifier's thread is full.
+    # frame I/O each: the configured cost, as in the gateway, and not the measured one. With one
+    # robot depth may use its whole thread. With two, it gets what the classifier and the frame
+    # I/O leave of the 1.9 cores that the quota keeps after the headroom; from three on, the
+    # classifier's thread is full.
     result = run("paced")
     shares = result.models["depth"].shares
 
@@ -650,7 +667,16 @@ def test_aligned_phases_capture_every_robots_first_frame_at_its_start() -> None:
 
 def test_a_run_is_deterministic_for_a_given_seed() -> None:
     def simulated() -> SimulationResult:
-        return simulate(CONFIG, sweep(3), TABLES, OVERHEADS, QUOTA_CORES, PhaseMode.RANDOM, 7)
+        return simulate(
+            CONFIG,
+            sweep(3),
+            TABLES,
+            OVERHEADS,
+            IO_CPU_MS_PER_FRAME,
+            QUOTA_CORES,
+            PhaseMode.RANDOM,
+            7,
+        )
 
     assert simulated() == simulated()
 
@@ -660,7 +686,9 @@ def test_simulate_refuses_a_table_without_a_configured_batch_size() -> None:
     tables = {"cls": ServiceTable(times_ns, times_ns), "depth": TABLES["depth"]}
 
     with pytest.raises(ValueError, match="service table of cls"):
-        simulate(CONFIG, steady(), tables, OVERHEADS, None, PhaseMode.RANDOM, SEED)
+        simulate(
+            CONFIG, steady(), tables, OVERHEADS, IO_CPU_MS_PER_FRAME, None, PhaseMode.RANDOM, SEED
+        )
 
 
 @pytest.mark.parametrize(

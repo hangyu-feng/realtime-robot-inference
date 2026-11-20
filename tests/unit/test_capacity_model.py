@@ -42,6 +42,9 @@ OVERHEADS = Overheads(
     dispatch_result_ns=NS_PER_MS // 4,
     deliver_ns=2 * NS_PER_MS,
 )
+# The measured cost of the frame I/O is not the configured 0.15 ms per frame, so that the
+# predictions show which of the two each value takes.
+IO_CPU_MS_PER_FRAME = 0.4
 # The wall time per frame of every batch. The classifier's cap is then 8 and depth's 2
 # (DESIGN.md 6.2).
 FRAME_MS = {"cls": 5.0, "depth": 40.0}
@@ -261,13 +264,17 @@ def document_with(path: tuple[str, ...], value: object) -> bytes:
 
 @pytest.fixture(scope="module")
 def predictions() -> dict[str, Any]:
-    return predict(CONFIG, TABLES, OVERHEADS, QUOTA_CORES, SEED, SHORT_CURVE, "linear")
+    return predict(
+        CONFIG, TABLES, OVERHEADS, IO_CPU_MS_PER_FRAME, QUOTA_CORES, SEED, SHORT_CURVE, "linear"
+    )
 
 
 @pytest.fixture(scope="module")
 def predictions_without_skip_rule() -> dict[str, Any]:
     config = replace(CONFIG, skip_rule=False)
-    return predict(config, TABLES, OVERHEADS, QUOTA_CORES, SEED, SHORT_CURVE, "linear")
+    return predict(
+        config, TABLES, OVERHEADS, IO_CPU_MS_PER_FRAME, QUOTA_CORES, SEED, SHORT_CURVE, "linear"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -282,7 +289,16 @@ def runs() -> dict[str, SimulationResult]:
         **{f"sweep.n{count}": sweep(count) for count in {1, 3, 5, 10, *SHORT_CURVE}},
     }
     return {
-        name: simulate(CONFIG, scenario, TABLES, OVERHEADS, QUOTA_CORES, PhaseMode.RANDOM, SEED)
+        name: simulate(
+            CONFIG,
+            scenario,
+            TABLES,
+            OVERHEADS,
+            IO_CPU_MS_PER_FRAME,
+            QUOTA_CORES,
+            PhaseMode.RANDOM,
+            SEED,
+        )
         for name, scenario in scenarios.items()
     }
 
@@ -396,7 +412,10 @@ def test_the_inputs_record_the_settings_and_the_plan_each_model_ran_with(
         2.0,
         list(SHORT_CURVE),
     )
-    assert inputs["io_cpu_ms_per_frame"] == CONFIG.io_cpu_ms_per_frame
+    assert (inputs["io_cpu_ms_per_frame"], inputs["configured_io_cpu_ms_per_frame"]) == (
+        IO_CPU_MS_PER_FRAME,
+        CONFIG.io_cpu_ms_per_frame,
+    )
     assert inputs["overheads_ms"] == {
         "transport_up": 1.0,
         "dispatch_request": 0.5,
@@ -529,6 +548,36 @@ def test_the_demand_curve_is_the_predicted_demand_of_the_sweep_run_at_each_robot
     ]
 
 
+def test_the_measured_io_cost_moves_the_demand_curve_and_no_fact_or_model_curve(
+    predictions: dict[str, Any],
+) -> None:
+    # Depth is paced at 10 and at 50 robots, so a share computed from the measured cost would
+    # move its rates away from those of a measured cost equal to the configured one.
+    equal_costs: dict[str, Any] = predict(
+        CONFIG,
+        TABLES,
+        OVERHEADS,
+        CONFIG.io_cpu_ms_per_frame,
+        QUOTA_CORES,
+        SEED,
+        SHORT_CURVE,
+        "linear",
+    )
+
+    assert predictions["facts"] == equal_costs["facts"]
+    assert {model: predictions["curves"][model] for model in MODEL_KEYS} == {
+        model: equal_costs["curves"][model] for model in MODEL_KEYS
+    }
+    assert all(
+        higher > lower
+        for higher, lower in zip(
+            predictions["curves"]["cpu_demand_cores"],
+            equal_costs["curves"]["cpu_demand_cores"],
+            strict=True,
+        )
+    )
+
+
 @pytest.mark.parametrize(
     ("model", "utilization"),
     [
@@ -537,7 +586,8 @@ def test_the_demand_curve_is_the_predicted_demand_of_the_sweep_run_at_each_robot
         ("cls", [0.225, 0.45, 2.25]),
         # At 60 ms of CPU time each, over depth's one thread at 1 and 2 robots. At 10 robots,
         # over its pacing share: what the quota leaves after the 0.1 core of headroom, the
-        # classifier's full thread and the frame I/O of 10 robots at 0.15 ms per frame.
+        # classifier's full thread and the frame I/O of 10 robots at the configured 0.15 ms per
+        # frame.
         ("depth", [1.8, 3.6, 18 / (1.9 - 1 - 0.045)]),
     ],
 )
@@ -551,7 +601,14 @@ def test_a_worker_that_leaves_its_thread_count_to_the_runtime_may_use_the_whole_
     models = {**MODELS, "cls": replace(MODELS["cls"], threads=0)}
 
     output: dict[str, Any] = predict(
-        replace(CONFIG, models=models), TABLES, OVERHEADS, QUOTA_CORES, SEED, (1,), ""
+        replace(CONFIG, models=models),
+        TABLES,
+        OVERHEADS,
+        IO_CPU_MS_PER_FRAME,
+        QUOTA_CORES,
+        SEED,
+        (1,),
+        "",
     )
 
     # 30 frames per second at 7.5 ms of CPU time each, over the 2 cores of the quota.
@@ -582,7 +639,9 @@ def test_a_model_whose_every_command_is_stale_has_a_null_peak_age_and_every_othe
     stale_tables = tables(STALE_DEPTH_FRAME_MS)
     null_key = "predict.steady.depth.command_age_peak_ms.p95"
 
-    output: dict[str, Any] = predict(CONFIG, stale_tables, OVERHEADS, QUOTA_CORES, SEED, (1,), "")
+    output: dict[str, Any] = predict(
+        CONFIG, stale_tables, OVERHEADS, IO_CPU_MS_PER_FRAME, QUOTA_CORES, SEED, (1,), ""
+    )
 
     facts = output["facts"]
     assert {key: value is None for key, value in facts.items()} == {
@@ -605,7 +664,9 @@ def test_runs_in_which_no_frame_arrives_give_gaps_as_long_as_the_run_and_no_stat
         "utilization": [None] * counts,
     }
 
-    output: dict[str, Any] = predict(CONFIG, TABLES, silent, QUOTA_CORES, SEED, SHORT_CURVE, "")
+    output: dict[str, Any] = predict(
+        CONFIG, TABLES, silent, IO_CPU_MS_PER_FRAME, QUOTA_CORES, SEED, SHORT_CURVE, ""
+    )
 
     curves = output["curves"]
     assert {
@@ -737,19 +798,38 @@ def test_an_input_that_is_not_an_object_is_refused() -> None:
         parse_input(b"[]", MODELS)
 
 
-def test_main_writes_predictions_that_json_reads_back(tmp_path: Path) -> None:
-    t_b = tmp_path / "t_b.json"
+@pytest.fixture(scope="module")
+def written(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """Return what main() writes for VALID_DOCUMENT under seed 3, as json reads it back."""
+    directory = tmp_path_factory.mktemp("main")
+    t_b = directory / "t_b.json"
     t_b.write_text(json.dumps(VALID_DOCUMENT))
-    out = tmp_path / "predictions.json"
-
+    out = directory / "predictions.json"
     main(["--t-b", str(t_b), "--out", str(out), "--seed", "3"])
+    predictions: dict[str, Any] = json.loads(out.read_text())
+    return predictions
 
-    written = json.loads(out.read_text())
+
+def test_main_writes_predictions_that_json_reads_back(written: dict[str, Any]) -> None:
     assert (written["label"], written["inputs"]["seed"]) == ("two single-thread workers", 3)
-    # The measured I/O cost reaches the simulation through the configuration.
-    assert written["inputs"]["io_cpu_ms_per_frame"] == 0.2
     assert written["inputs"]["robot_counts"] == list(range(1, 51))
     assert set(written["facts"]) == FACT_KEYS
+
+
+def test_main_records_the_files_io_cost_beside_the_configured_one(written: dict[str, Any]) -> None:
+    inputs = written["inputs"]
+
+    assert (inputs["io_cpu_ms_per_frame"], inputs["configured_io_cpu_ms_per_frame"]) == (0.2, 0.15)
+
+
+def test_main_computes_the_pacing_share_from_the_configured_io_cost(
+    written: dict[str, Any],
+) -> None:
+    # At 10 robots the classifier fills its thread, and depth serves every frame alone, at 58 ms
+    # of CPU time: 17.4 cores offered. Depth's share is what the quota leaves after the 0.1 core
+    # of headroom, the classifier's thread and the frame I/O of 10 robots at the configured
+    # 0.15 ms per frame. The file's 0.2 ms would leave 0.84 cores.
+    assert written["curves"]["depth"]["utilization"][9] == pytest.approx(17.4 / 0.855)
 
 
 def test_main_seeds_the_robots_phases_with_0_by_default(tmp_path: Path) -> None:

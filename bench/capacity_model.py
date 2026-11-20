@@ -6,7 +6,8 @@ the handling times outside the workers; and the CPU time per frame of the frame 
 simulates the demos of DESIGN.md 9 and a sweep over robot counts with bench.simulation, under
 the default server configuration, and writes one JSON object: the input's label, the inputs and
 scheduler settings used, the predict.* fact keys of DESIGN.md 9, and the curves that the sweep
-plots draw (DESIGN.md 6.3 and 6.5).
+plots draw (DESIGN.md 6.3 and 6.5). The measured cost of the frame I/O enters only the predicted
+CPU demand: the pacing share comes from the configured cost, as in the gateway.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import json
 import math
 import sys
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from bench.scenarios import Scenario, disconnect, late_joiner, massive, steady, sweep
@@ -137,23 +138,46 @@ def predict(
     config: ServerConfig,
     tables: Mapping[str, ServiceTable],
     overheads: Overheads,
+    io_cpu_ms_per_frame: float,
     quota_cores: float,
     seed: int,
     robot_counts: Sequence[int],
     label: str,
 ) -> dict[str, object]:
-    """Simulate the demos and a sweep at each robot count, and build the predictions."""
+    """Simulate the demos and a sweep at each robot count, and build the predictions.
+
+    io_cpu_ms_per_frame is the measured CPU time of the frame I/O per frame, which enters only
+    the predicted CPU demand.
+    """
 
     def run(scenario: Scenario) -> _Run:
         # Every run draws its robots' phases at random from the seed, as the demos run.
-        result = simulate(config, scenario, tables, overheads, quota_cores, PhaseMode.RANDOM, seed)
+        result = simulate(
+            config,
+            scenario,
+            tables,
+            overheads,
+            io_cpu_ms_per_frame,
+            quota_cores,
+            PhaseMode.RANDOM,
+            seed,
+        )
         return _Run(scenario, result)
 
     sweeps = {count: run(sweep(count)) for count in sorted({*_DEMO_SWEEP_COUNTS, *robot_counts})}
     steady_run = run(steady())
     return {
         "label": label,
-        "inputs": _inputs(config, tables, overheads, quota_cores, seed, robot_counts, steady_run),
+        "inputs": _inputs(
+            config,
+            tables,
+            overheads,
+            io_cpu_ms_per_frame,
+            quota_cores,
+            seed,
+            robot_counts,
+            steady_run,
+        ),
         "facts": _facts(steady_run, run(late_joiner()), sweeps, run(disconnect()), run(massive())),
         "curves": _curves(config, tables, overheads, quota_cores, robot_counts, sweeps),
     }
@@ -163,6 +187,7 @@ def _inputs(
     config: ServerConfig,
     tables: Mapping[str, ServiceTable],
     overheads: Overheads,
+    io_cpu_ms_per_frame: float,
     quota_cores: float,
     seed: int,
     robot_counts: Sequence[int],
@@ -173,7 +198,8 @@ def _inputs(
     return {
         "seed": seed,
         "quota_cores": quota_cores,
-        "io_cpu_ms_per_frame": config.io_cpu_ms_per_frame,
+        "io_cpu_ms_per_frame": io_cpu_ms_per_frame,
+        "configured_io_cpu_ms_per_frame": config.io_cpu_ms_per_frame,
         "overheads_ms": {
             "transport_up": overheads.transport_up_ns / _NS_PER_MS,
             "dispatch_request": overheads.dispatch_request_ns / _NS_PER_MS,
@@ -476,19 +502,20 @@ def main(argv: Sequence[str]) -> None:
         data = arguments.t_b.read_bytes()
     except OSError as error:
         parser.error(f"argument --t-b: {error}")
-    default = ServerConfig()
+    config = ServerConfig()
     try:
-        measured = parse_input(data, default.models)
+        measured = parse_input(data, config.models)
     except CapacityInputError as error:
         parser.error(f"{arguments.t_b}: {error}")
     # ASSUMPTION: A1. The predictions are for the single topology, in which the robot fleet runs
-    # under the same quota as the gateway, so the measured I/O cost per frame covers both. The
-    # file is the one source of that cost, and the simulation reads it from the configuration only.
-    config = replace(default, io_cpu_ms_per_frame=measured.io_cpu_ms_per_frame)
+    # under the same quota as the gateway, so the measured I/O cost per frame covers both. It
+    # enters only the predicted CPU demand: the pacing share comes from the configured cost, as
+    # in the gateway.
     predictions = predict(
         config,
         measured.tables,
         measured.overheads,
+        measured.io_cpu_ms_per_frame,
         QUOTA_CORES,
         arguments.seed,
         _CURVE_ROBOT_COUNTS,

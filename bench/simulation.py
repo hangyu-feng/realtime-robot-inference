@@ -153,8 +153,8 @@ class SimulationResult:
 
     windows is keyed by window name, model and robot id, and holds every robot that ran within
     the window. final is keyed by robot id and model. cpu_demand_cores is the predicted total
-    CPU demand: the workers' CPU time, and config.io_cpu_ms_per_frame for every frame sent, over
-    the run's duration.
+    CPU demand: the workers' CPU time, and the measured cost of the frame I/O for every frame
+    sent, over the run's duration.
     """
 
     windows: Mapping[str, Mapping[str, Mapping[str, RobotWindow]]]
@@ -198,6 +198,7 @@ def simulate(
     scenario: Scenario,
     tables: Mapping[str, ServiceTable],
     overheads: Overheads,
+    io_cpu_ms_per_frame: float,
     quota_cores: float | None,
     phase_mode: PhaseMode,
     seed: int,
@@ -205,7 +206,10 @@ def simulate(
     """Run the scenario and return what it predicts.
 
     tables holds every model's service table, with a time for each size of its batch_sizes;
-    other sizes serve the interpolation. Without a CPU quota (quota_cores None) nothing is paced.
+    other sizes serve the interpolation. io_cpu_ms_per_frame is the measured CPU time of the
+    frame I/O per frame, and enters only the predicted CPU demand: the pacing share comes from
+    config.io_cpu_ms_per_frame, as in the gateway. Without a CPU quota (quota_cores None)
+    nothing is paced.
     """
     for model, model_config in config.models.items():
         table = tables.get(model)
@@ -226,7 +230,9 @@ def simulate(
         phase_ns = phases.randrange(period_ns) if phase_mode is PhaseMode.RANDOM else 0
         ticks = CaptureSchedule(start_ns + phase_ns, period_ns)
         robots.append(_Robot(plan.robot_id, start_ns, stop_ns, ticks))
-    simulation = _Simulation(config, tables, overheads, quota_cores, end_ns, robots)
+    simulation = _Simulation(
+        config, tables, overheads, io_cpu_ms_per_frame, quota_cores, end_ns, robots
+    )
     simulation.run()
     return simulation.result(scenario.windows)
 
@@ -239,12 +245,14 @@ class _Simulation:
         config: ServerConfig,
         tables: Mapping[str, ServiceTable],
         overheads: Overheads,
+        io_cpu_ms_per_frame: float,
         quota_cores: float | None,
         end_ns: int,
         robots: Sequence[_Robot],
     ) -> None:
         self._config = config
         self._overheads = overheads
+        self._io_cpu_ms_per_frame = io_cpu_ms_per_frame
         self._quota_cores = quota_cores
         self._end_ns = end_ns
         self._robots = robots
@@ -308,7 +316,7 @@ class _Simulation:
         models = {model: self._model_run(model) for model in self._config.models}
         # A robot sends one frame at each of its ticks before its stop.
         frames_sent = sum(robot.ticks.latest_due(robot.stop_ns - 1) + 1 for robot in self._robots)
-        io_cpu_ns = frames_sent * self._config.io_cpu_ms_per_frame * _NS_PER_MS
+        io_cpu_ns = frames_sent * self._io_cpu_ms_per_frame * _NS_PER_MS
         cpu_ns = sum(run.cpu_ns for run in models.values()) + io_cpu_ns
         return SimulationResult(
             windows={

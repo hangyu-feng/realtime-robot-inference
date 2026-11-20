@@ -413,6 +413,8 @@ Hypotheses that the model and the design rest on. Each is confirmed or refuted b
 
 Predictions for the five demos are produced by running the real scheduler code under a simulated clock, with the measured T(b) as service times. They are written into the tables of section 9 before the first end-to-end run. Each gap between prediction and measurement that exceeds run-to-run spread is explained in `predicted_vs_measured.md`.
 
+The model is an idealization, and its limits are stated before the first end-to-end run. Each batch takes the mean wall and CPU time that the model benchmark measured for its size with the worker alone in the container. Each transport and dispatch leg is a constant, set to the whole measured round trip that contains it, which is an upper bound. Robots send exactly on their ticks. The model has no spread in service time, no fire lag, no slowdown of a worker beside the other busy processes, no quota freeze, and no gateway work beyond the measured I/O cost. Its percentiles therefore spread only with frame phase and scheduling. The predicted p95, p99 and max carry no spread from service time or fire lag, so the measured tails are expected at or above them, to within the run-to-run spread of the batch time, and the measured maximum well above. The predicted throughput of a saturated model is a ceiling, to within the same spread. The predicted CPU demand counts the workers and the frame I/O only. Below saturation the classifier's freshness and batch size depend on the phase offsets drawn for a run, so those predictions hold for one draw. After the first end-to-end run a prediction changes only through its model-benchmark inputs; a change to the model's code, or to the scheduler code and defaults it runs, that moves a prediction is listed in section 13 with the predictions before and after it.
+
 ### 6.4 CPU budget
 
 - The limit is a quota: the container may use Q x P of CPU time per period P. When total demand D exceeds Q, the kernel freezes every process in the container for the rest of the period. The gateway stops reading, the classifier stalls and the simulator's timers fire late. So the freeze inflates the freshness tail and corrupts the measurement at the same moment.
@@ -544,6 +546,8 @@ Each demo is a scenario of section 11.2, run several times as gated runs, in bot
 | Freshness trend (ms per s) | 0 | `{{steady.cls.freshness_trend_ms_per_s}}` | 0 | `{{steady.depth.freshness_trend_ms_per_s}}` |
 | Peak command age p95 (ms) | 36.4 | `{{steady.cls.command_age_peak_ms.p95}}` | 167 | `{{steady.depth.command_age_peak_ms.p95}}` |
 
+The predicted p95, p99 and max carry no service-time spread and no fire lag (section 6.3).
+
 ### 9.2 Late joiner
 
 - **Procedure.** Robot A streams alone for 10 s. Robot B joins. Both run for 20 s more.
@@ -604,7 +608,7 @@ Time from the kill until the server closes the connection: `{{disconnect.detect_
 | Quantity | `cls` | `depth` |
 |---|---|---|
 | Commands/s per robot, min / mean / max | `{{massive.cls.commands_per_s_per_robot.min}}` / `{{massive.cls.commands_per_s_per_robot.mean}}` / `{{massive.cls.commands_per_s_per_robot.max}}` | `{{massive.depth.commands_per_s_per_robot.min}}` / `{{massive.depth.commands_per_s_per_robot.mean}}` / `{{massive.depth.commands_per_s_per_robot.max}}` |
-| Predicted commands/s per robot (preliminary) | 8.60 | 0.199 |
+| Predicted commands/s per robot (preliminary) | 8.60 | 0.200 |
 | Lowest over mean rate | `{{massive.cls.fairness.min_over_mean}}` | `{{massive.depth.fairness.min_over_mean}}` |
 | Jain index | `{{massive.cls.fairness.jain}}` | `{{massive.depth.fairness.jain}}` |
 | Longest command gap (ms), measured / bound | `{{massive.cls.command_gap_ms.max}}` / `{{massive.cls.command_gap_bound_ms}}` | `{{massive.depth.command_gap_ms.max}}` / `{{massive.depth.command_gap_bound_ms}}` |
