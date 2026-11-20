@@ -38,7 +38,9 @@ NS_PER_S = 1_000_000_000
 NS_PER_MS = 1_000_000
 SEED = 0
 QUOTA_CORES = 2.0
-CONFIG = ServerConfig()
+# The configured cost of the frame I/O is given, not left to the default, because the pacing
+# shares worked out below rest on it.
+CONFIG = replace(ServerConfig(), io_cpu_ms_per_frame=0.15)
 SKIP_OFF = replace(CONFIG, skip_rule=False)
 # The uplink and the delivery differ, so that a run shows which of the two a time includes.
 OVERHEADS = Overheads(

@@ -1,0 +1,21 @@
+..F..E..s..x..X                                                          [100%]
+==================================== ERRORS ====================================
+_________________ ERROR at setup of test_uses_a_broken_fixture _________________
+
+    @pytest.fixture
+    def broken() -> None:
+>       raise RuntimeError("the fixture broke")
+E       RuntimeError: the fixture broke
+
+test_error.py:19: RuntimeError
+=================================== FAILURES ===================================
+_______________________________ test_subtraction _______________________________
+
+    def test_subtraction() -> None:
+>       assert 2 - 1 == 0
+E       assert (2 - 1) == 0
+
+test_failed.py:18: AssertionError
+=========================== short test summary info ============================
+SKIPPED [1] test_skipped.py:18: the model file is missing
+1 failed, 10 passed, 1 skipped, 5 deselected, 1 xfailed, 1 xpassed, 1 error in 0.12s

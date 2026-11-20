@@ -1,6 +1,8 @@
-"""The service with real processes when a robot dies or freezes and when the gateway is stopped."""
+"""The service with real processes when a robot or a worker dies, freezes or hangs, a robot id
+is used twice, and the gateway is stopped or killed."""
 
 import contextlib
+import os
 import signal
 import sys
 import time
@@ -13,17 +15,21 @@ from common.commands import MODEL_KEYS
 from tests.integration.harness import (
     EXIT_TIMEOUT_S,
     NS_PER_S,
+    SERVED_SHARE,
     at_or_after,
     first_receive_ns,
     fleet_log,
     fleet_timeout_s,
+    gains,
     killed_on_exit,
     plan,
     rate_per_s,
     relative_spread,
     robot_commands,
+    run_fleets,
     running_service,
     scrape,
+    silent_seconds,
     start_fleet,
     time_zero_ns,
     wait_for_exit,
@@ -42,6 +48,8 @@ RATE_TOLERANCE = 0.10
 SETTLE_NS = NS_PER_S // 2
 # Waiting for a planned instant of a plan whose fleet has not started yet.
 INSTANT_TIMEOUT_S = 30.0
+# Only keeps a broken service from hanging the suite: a fake worker restarts in about a second.
+RESTART_TIMEOUT_S = 30.0
 
 
 def test_a_killed_robot_frees_its_share_and_its_state(tmp_path: Path) -> None:
@@ -178,3 +186,146 @@ def test_sigterm_while_streaming_stops_the_gateway_and_its_workers(tmp_path: Pat
     assert fleet_status == 0
     # The robots log the close code of each session that ends: 1001, the gateway going away.
     assert "1001" in fleet_log(tmp_path / "fleet")
+
+
+def test_a_second_process_with_the_same_robot_id_replaces_the_first_which_stops_for_good(
+    tmp_path: Path,
+) -> None:
+    duration_s = 6.0
+
+    with running_service({}, tmp_path / "gateway") as service:
+        before = scrape(service)
+        t0_ns = time_zero_ns()
+        first_plan = plan(t0_ns, duration_s, [("t7", 0.0, None)])
+        second_plan = plan(t0_ns, duration_s, [("t7", 2.0, None)])
+        with (
+            killed_on_exit(start_fleet(service, first_plan, tmp_path / "first")) as first,
+            killed_on_exit(start_fleet(service, second_plan, tmp_path / "second")) as second,
+        ):
+            first_session = wait_for_metrics(
+                service, at_or_after(t0_ns + 3 * NS_PER_S // 2), INSTANT_TIMEOUT_S
+            )["robots"]["t7"]["session"]
+            statuses = [
+                first.wait(fleet_timeout_s(first_plan)),
+                second.wait(fleet_timeout_s(second_plan)),
+            ]
+        after = scrape(service)
+
+    commands = robot_commands(tmp_path / "second", "t7")
+    session = after["robots"]["t7"]["session"]
+    # The first robot is told its session was replaced, a close that a reconnect would only
+    # repeat, so it stops and its process fails.
+    assert statuses == [1, 0]
+    assert "4001" in fleet_log(tmp_path / "first")
+    assert gains(before, after, "closed")["replaced"] == 1
+    assert gains(before, after, "closed")["internal_error"] == 0
+    assert session > first_session
+    assert set(commands["model"].tolist()) == set(range(len(MODEL_KEYS)))
+    assert set(commands["session"].tolist()) == {session}
+    assert conservation_violations(after) == []
+
+
+def test_a_killed_depth_worker_is_restarted_and_cls_keeps_its_rate(tmp_path: Path) -> None:
+    duration_s = 5.0
+    robot_ids = ["t8a", "t8b"]
+
+    with running_service({}, tmp_path / "gateway") as service:
+        before = scrape(service)
+        restarts = before["workers"]["depth"]["restarts"]
+        t0_ns = time_zero_ns()
+        fleet_plan = plan(t0_ns, duration_s, [(robot_id, 0.0, None) for robot_id in robot_ids])
+        with killed_on_exit(start_fleet(service, fleet_plan, tmp_path / "fleet")) as fleet:
+            streaming = wait_for_metrics(
+                service, at_or_after(t0_ns + 3 * NS_PER_S // 2), INSTANT_TIMEOUT_S
+            )
+            pid = streaming["workers"]["depth"]["pid"]
+            os.kill(pid, signal.SIGKILL)
+            killed_ns = time.monotonic_ns()
+            worker_exited = wait_for_exit(pid, EXIT_TIMEOUT_S)
+            restarted = wait_for_metrics(
+                service,
+                lambda snapshot: (
+                    snapshot["workers"]["depth"]["restarts"] == restarts + 1
+                    and snapshot["workers"]["depth"]["state"] == "ready"
+                ),
+                RESTART_TIMEOUT_S,
+            )
+            fleet_status = fleet.wait(fleet_timeout_s(fleet_plan))
+        after = scrape(service)
+
+    end_ns = t0_ns + round(duration_s * NS_PER_S)
+    rates_per_s = {}
+    for robot_id in robot_ids:
+        commands = robot_commands(tmp_path / "fleet", robot_id)
+        rates_per_s[robot_id] = [
+            rate_per_s(commands, "cls", t0_ns + SETTLE_NS, killed_ns),
+            rate_per_s(commands, "cls", killed_ns + SETTLE_NS, end_ns),
+        ]
+    assert worker_exited
+    assert fleet_status == 0
+    assert restarted["workers"]["depth"]["pid"] != pid
+    assert after["workers"]["depth"]["restarts"] - restarts == 1
+    assert after["workers"]["cls"]["restarts"] == before["workers"]["cls"]["restarts"]
+    assert all(min(rates) > 0 for rates in rates_per_s.values()), rates_per_s
+    assert all(relative_spread(rates) <= RATE_TOLERANCE for rates in rates_per_s.values()), (
+        rates_per_s
+    )
+    assert conservation_violations(after) == []
+    assert gains(before, after, "closed")["internal_error"] == 0
+
+
+def test_a_depth_batch_over_the_inference_timeout_restarts_the_worker_and_cls_keeps_serving(
+    tmp_path: Path,
+) -> None:
+    duration_s = 6
+    robot_ids = ["t9a", "t9b"]
+    # Every depth batch takes 300 ms, past the 200 ms timeout at the await of its result, so
+    # depth never commands.
+    overrides = {"inference_timeout_ms": 200, "models": {"depth": {"fake_frame_ms": 300.0}}}
+
+    with running_service(overrides, tmp_path / "gateway") as service:
+        t0_ns = time_zero_ns()
+        fleet_plan = plan(t0_ns, duration_s, [(robot_id, 0.0, None) for robot_id in robot_ids])
+        run_fleets(service, [(fleet_plan, tmp_path / "fleet", ())])
+        after = scrape(service)
+
+    workers = after["workers"]
+    robots = after["robots"]
+    depth_sent = [robots[robot_id]["models"]["depth"]["commands_sent"] for robot_id in robot_ids]
+    silent = {
+        robot_id: silent_seconds(
+            robot_commands(tmp_path / "fleet", robot_id), "cls", t0_ns, 1, duration_s
+        )
+        for robot_id in robot_ids
+    }
+    served_share = {
+        robot_id: robots[robot_id]["telemetry"]["models"]["cls"]["commands_received"]
+        / robots[robot_id]["telemetry"]["frames_sent"]
+        for robot_id in robot_ids
+    }
+    assert workers["depth"]["timeouts"] >= 1
+    assert workers["depth"]["restarts"] >= 1
+    assert [workers["cls"]["timeouts"], workers["cls"]["restarts"]] == [0, 0]
+    assert depth_sent == [0] * len(robot_ids)
+    assert silent == {robot_id: [] for robot_id in robot_ids}
+    assert min(served_share.values()) >= SERVED_SHARE, served_share
+    assert conservation_violations(after) == []
+
+
+def test_the_workers_exit_when_the_gateway_is_killed(tmp_path: Path) -> None:
+    with running_service({}, tmp_path / "gateway", expect_exit=None) as service:
+        t0_ns = time_zero_ns()
+        fleet_plan = plan(t0_ns, 5.0, [("t14", 0.0, None)])
+        with killed_on_exit(start_fleet(service, fleet_plan, tmp_path / "fleet")) as fleet:
+            # A robot streams, so the depth worker is mid-batch when its link closes.
+            streaming = wait_for_metrics(service, at_or_after(t0_ns + NS_PER_S), INSTANT_TIMEOUT_S)
+            worker_pids = [streaming["workers"][model]["pid"] for model in MODEL_KEYS]
+            service.process.kill()
+            gateway_status = service.process.wait(EXIT_TIMEOUT_S)
+            workers_exited = [wait_for_exit(pid, EXIT_TIMEOUT_S) for pid in worker_pids]
+            # The robot retries until its plan ends.
+            fleet_status = fleet.wait(fleet_timeout_s(fleet_plan))
+
+    assert gateway_status == -signal.SIGKILL
+    assert workers_exited == [True] * len(MODEL_KEYS)
+    assert fleet_status == 0

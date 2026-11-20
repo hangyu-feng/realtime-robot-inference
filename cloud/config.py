@@ -274,13 +274,14 @@ class ServerConfig:
     # The paced worker keeps serving even when the others' predicted demand fills the quota.
     pacing_min_share_cores: float = 0.25
     # CPU time per frame of everything outside the workers that runs under the quota: the
-    # gateway and, in the single topology, the robot fleet. The pacing share reserves it,
-    # so a value below the real cost lets the container's demand pass the quota, and the
-    # kernel then freezes every process in it: err high, at or above the cost per frame of a
-    # run with both workers busy. The capacity model computes the share from this
-    # field, as the gateway does, and takes the measured cost of its input file only for its
-    # predicted CPU demand.
-    io_cpu_ms_per_frame: float = 0.15
+    # gateway and, in the single topology, the robot fleet and the scenario driver. The
+    # pacing share reserves it, so a value below the real cost lets the container's demand
+    # pass the quota, and the kernel then freezes every process in it: err high, at or above
+    # the cost per frame of a single-topology run of 50 robots with both workers busy, rounded
+    # up to 0.01 ms. One value serves both topologies. The capacity model computes the share
+    # from this field, as the gateway does, and takes the measured cost of its input file only
+    # for its predicted CPU demand.
+    io_cpu_ms_per_frame: float = 0.26
 
     # A safety valve, not the main mechanism (DESIGN.md 8.1).
     max_connections: int = 64

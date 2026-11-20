@@ -17,7 +17,7 @@ venv/
 /models/
 
 # Run outputs
-results/raw/
+results/raw/**/samples/
 *.log
 
 # OS / editor

@@ -189,6 +189,29 @@ def test_decode_accepts_other_jpeg_encodings_of_a_frame(jpeg: bytes, parameters:
 
 
 @pytest.mark.parametrize(
+    ("half_size", "shape"),
+    [
+        pytest.param(False, FULL_SIZE_SHAPE, id="full"),
+        pytest.param(True, HALF_SIZE_SHAPE, id="half"),
+    ],
+)
+def test_decode_gives_a_grayscale_frame_three_equal_channels(
+    jpeg: bytes, half_size: bool, shape: tuple[int, int, int]
+) -> None:
+    # DESIGN.md 1.4 does not list a grayscale JPEG among the frames refused, so one of the frame
+    # size is served, and the colour decode repeats its one channel.
+    # OpenCV's stubs type the result of cvtColor as any number; it is the 8-bit plane.
+    grey_plane = cv2.cvtColor(decode_jpeg(jpeg, half_size=False), cv2.COLOR_BGR2GRAY)
+    grey = encode(grey_plane.astype(np.uint8), ".jpg")
+
+    image = decode_jpeg(grey, half_size=half_size)
+
+    assert image.shape == shape
+    assert (image[..., 0] == image[..., 1]).all()
+    assert (image[..., 1] == image[..., 2]).all()
+
+
+@pytest.mark.parametrize(
     "inserted",
     [
         pytest.param(segment(COMMENT, b"camera 7"), id="comment"),

@@ -29,6 +29,14 @@ class Window:
 
 
 @dataclass(frozen=True)
+class WorkerKill:
+    """A SIGKILL of one model's worker process at a planned time from t0."""
+
+    model: str
+    at_s: float
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A demo's timeline. Its windows always include one named 'all' that covers the whole run."""
 
@@ -36,8 +44,12 @@ class Scenario:
     duration_s: float
     robots: tuple[RobotPlan, ...]
     windows: tuple[Window, ...]
+    # The worker the scenario kills; None in every scenario that kills none.
+    fault: WorkerKill | None = None
 
 
+# ASSUMPTION: A18. Five demos are done, as the brief lists them, though its evaluation text
+# says four: steady, late_joiner, sweep, disconnect and massive, whose memory check is the soak.
 def steady() -> Scenario:
     """Return one robot for 30 s (DESIGN.md 9.1)."""
     return Scenario("steady", 30.0, (RobotPlan("a", 0.0, None),), (Window("all", 0.0, 30.0),))
@@ -77,6 +89,22 @@ def disconnect() -> Scenario:
             RobotPlan("c", 0.0, 20.0),
         ),
         (Window("all", 0.0, 40.0), Window("before", 0.0, 20.0), Window("after", 20.0, 40.0)),
+    )
+
+
+def worker_kill() -> Scenario:
+    """Return robots a and b for 40 s, with the depth worker killed at 20 s (DESIGN.md 11.2).
+
+    Depth is mid-batch whenever robots stream, so the kill falls inside a batch.
+    """
+    # The timeline is the disconnect's, with two robots: windows of equal length before and
+    # after the kill, and time after it for a restart that loads and calibrates a real model.
+    return Scenario(
+        "worker_kill",
+        40.0,
+        (RobotPlan("a", 0.0, None), RobotPlan("b", 0.0, None)),
+        (Window("all", 0.0, 40.0), Window("before", 0.0, 20.0), Window("after", 20.0, 40.0)),
+        fault=WorkerKill("depth", 20.0),
     )
 
 

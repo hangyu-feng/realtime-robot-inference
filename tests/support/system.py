@@ -275,13 +275,14 @@ class InProcessSystem:
         *,
         uplink: LinkSettings = NO_DELAY,
         downlink: LinkSettings = NO_DELAY,
+        frame_rate_hz: float = _ROBOT_DEFAULTS.frame_rate_hz,
     ) -> Robot:
         """Start a robot that streams from start_ns, where its capture schedule starts, to stop_ns.
 
         A robot added under the id of a connected one replaces that session, as a second
         process with the id would.
         """
-        settings = RobotSettings(uplink=uplink, downlink=downlink)
+        settings = RobotSettings(uplink=uplink, downlink=downlink, frame_rate_hz=frame_rate_hz)
         period_ns = round(_NS_PER_S / settings.frame_rate_hz)
         # Every tick of the robot's time with a second of slack, and a command per tick and
         # model, as robot.fleet sizes its logs.

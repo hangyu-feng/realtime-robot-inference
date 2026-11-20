@@ -650,7 +650,7 @@ def test_echo_of_the_default_config_lists_every_setting_with_its_default() -> No
                 "fake_frame_ms": 0.0,
             },
         },
-        "pacing": {"headroom_cores": 0.1, "min_share_cores": 0.25, "io_cpu_ms_per_frame": 0.15},
+        "pacing": {"headroom_cores": 0.1, "min_share_cores": 0.25, "io_cpu_ms_per_frame": 0.26},
         "worker_nice": 0,
         "max_connections": 64,
         "auth_required": False,

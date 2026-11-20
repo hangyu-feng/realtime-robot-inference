@@ -6,12 +6,14 @@ from bench.scenarios import (
     RobotPlan,
     Scenario,
     Window,
+    WorkerKill,
     disconnect,
     late_joiner,
     massive,
     soak,
     steady,
     sweep,
+    worker_kill,
 )
 
 
@@ -37,6 +39,25 @@ def test_disconnect_stops_c_at_20_s_while_the_survivors_run_to_the_end() -> None
         (RobotPlan("a", 0.0, None), RobotPlan("b", 0.0, None), RobotPlan("c", 0.0, 20.0)),
         (Window("all", 0.0, 40.0), Window("before", 0.0, 20.0), Window("after", 20.0, 40.0)),
     )
+
+
+def test_worker_kill_runs_a_and_b_to_the_end_and_kills_the_depth_worker_at_20_s() -> None:
+    assert worker_kill() == Scenario(
+        "worker_kill",
+        40.0,
+        (RobotPlan("a", 0.0, None), RobotPlan("b", 0.0, None)),
+        (Window("all", 0.0, 40.0), Window("before", 0.0, 20.0), Window("after", 20.0, 40.0)),
+        WorkerKill("depth", 20.0),
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [steady(), late_joiner(), sweep(5), disconnect(), massive(), soak()],
+    ids=["steady", "late_joiner", "sweep", "disconnect", "massive", "soak"],
+)
+def test_every_other_scenario_kills_no_worker(scenario: Scenario) -> None:
+    assert scenario.fault is None
 
 
 @pytest.mark.parametrize(
@@ -78,8 +99,8 @@ def test_massive_and_soak_run_50_distinct_robots_for_the_whole_scenario(
 
 @pytest.mark.parametrize(
     "scenario",
-    [steady(), late_joiner(), sweep(5), disconnect(), massive(), soak()],
-    ids=["steady", "late_joiner", "sweep", "disconnect", "massive", "soak"],
+    [steady(), late_joiner(), sweep(5), disconnect(), worker_kill(), massive(), soak()],
+    ids=["steady", "late_joiner", "sweep", "disconnect", "worker_kill", "massive", "soak"],
 )
 def test_every_scenario_has_a_window_all_that_covers_the_run(scenario: Scenario) -> None:
     assert Window("all", 0.0, scenario.duration_s) in scenario.windows

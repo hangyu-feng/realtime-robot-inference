@@ -1,0 +1,371 @@
+{
+  "constants": [
+    {
+      "text": "0",
+      "category": "design",
+      "source": "the predicted freshness trend of the steady table, 0 ms per s (DESIGN.md 9.1); the WebSocket write limit, 0 bytes (DESIGN.md 5.1, write_limit in common/transport_ws.py); the default worker niceness, 0 (DESIGN.md 6.4, ServerConfig.worker_nice in cloud/config.py); frames_pending 0 when the slot holds nothing unfinished, rtt_ms reading 0 ms at the clock's resolution (DESIGN.md 10.3); internal_error 0 in a correct run and every close reason present at 0 (DESIGN.md 10.7); scenario windows and robot A starting at 0 s, t0 (DESIGN.md 9.2, 9.4, 11.2, bench/scenarios.py)"
+    },
+    {
+      "text": "0",
+      "category": "derived",
+      "source": "the formulas of DESIGN.md 6.3: max(0, A_m(N) - W_m), slot wait w between 0 and tau, a quota freeze of 0 when D <= Q; histogram bucket 0, the first bucket (DESIGN.md 10.1, common/histogram.py)"
+    },
+    {
+      "text": "0.01",
+      "category": "design",
+      "source": "the lower end of the time histograms, 0.01 ms (DESIGN.md 10.1, RANGE_MIN_MS in common/histogram.py)"
+    },
+    {
+      "text": "1",
+      "category": "brief",
+      "source": "1 robot in the steady demo, and the sweep's first robot count (the brief's Demonstration; DESIGN.md 2, 9.1, 9.3, 11.2, 11.4, bench/scenarios.py steady, SWEEP_ROBOT_COUNTS in bench/runplan.py); the section 12 experiments at 1 robot reuse these counts"
+    },
+    {
+      "text": "1",
+      "category": "design",
+      "source": "one gateway process with one event loop, one process and one inference thread per worker, one fleet process (DESIGN.md 1.2, 4.6; ModelConfig.threads in cloud/config.py); batch size 1 and batch cap 1, the smallest calibrated size (DESIGN.md 2, 4.6, 6.2, 10.7, 12; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the published MiDaS graph's batch dimension fixed at 1 (DESIGN.md 4.6); OPENBLAS_NUM_THREADS=1 and OMP_NUM_THREADS=1 (DESIGN.md 4.6, Dockerfile); a robot speed of 1 m/s for the depth displacement budget (DESIGN.md 5.2, common/thresholds.py); 1 s bins for settle and recovery (DESIGN.md 9.2, 9.4, SERIES_BIN_S in bench/summarize.py, the unit of those keys in bench/facts.py); 1 ms bins for the freshness and age curves (DESIGN.md 11.3, CURVE_BIN_MS in bench/summarize.py); frames_pending 1 (DESIGN.md 10.3); the absolute floor of throttled time, 1 ms per s (DESIGN.md 12, THROTTLED_FLOOR_MS_PER_S in bench/candidates.py); top-1 agreement as a guard (DESIGN.md 12); the event loop's timer resolution, 1 ms (DESIGN.md 10.7, 13; whole milliseconds, as _MIN_WAIT_NS in cloud/config.py states)"
+    },
+    {
+      "text": "1",
+      "category": "protocol",
+      "source": "wire protocol version 1 (DESIGN.md 4.3, 10.8; PROTOCOL_VERSION in common/protocol.py); /metrics schema version 1 (DESIGN.md 10.2, cloud/metrics.py); cgroup version 1 (DESIGN.md 10.7, common/cgroup.py)"
+    },
+    {
+      "text": "1",
+      "category": "assumption",
+      "source": "A10: robot telemetry at 1 Hz (DESIGN.md 3, 4.3, 10.4; _TELEMETRY_PERIOD_NS in robot/session.py); A3: the classification command carries the top-1 class"
+    },
+    {
+      "text": "1",
+      "category": "derived",
+      "source": "utilization 1, where demand equals capacity (DESIGN.md 2, 6.3, 6.5); the coefficients of the formulas of DESIGN.md 6.3: 1 - min(1, ...), ceil(N / b_m) + 1, P x (1 - Q / D); the bucket edge 0.01 x 2^((i+1)/8) (DESIGN.md 10.1); the cls watchdog limit, 1 s = 2 x the 500 ms stale threshold (DESIGN.md 5.2, DEFAULT_WATCHDOG_MS in common/thresholds.py)"
+    },
+    {
+      "text": "2",
+      "category": "brief",
+      "source": "the CPU limit, 2 CPU cores (the brief's Runtime Constraints; A15, A19; DESIGN.md 1.1, 1.2, 1.3, 3, 4.1, 6.3 Q, 6.4, 9.3, 9.5, 9.6, 15; EXPECTED_LIMITS in bench/gates.py, cpus in docker-compose.yml; README); the late joiner's 2 robots, A and B (the brief's Demonstration; DESIGN.md 11.2, bench/scenarios.py late_joiner)"
+    },
+    {
+      "text": "2",
+      "category": "design",
+      "source": "2 inference threads in the thread experiments and the model benchmark (DESIGN.md 1.2, 6.2, 6.3 H8, 6.5, 12; BENCH_THREADS in bench/facts.py), and option (b) of DESIGN.md 4.6, one executor with 2 threads; batch size 2 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py) and the depth_cap_2 candidate's cap 2 (DESIGN.md 12, bench/candidates.py); the robots container's memory limit, 2 GB (DESIGN.md 9.6, README; mem_limit of robots in docker-compose.split.yml); the 2 robots of worker_kill (DESIGN.md 11.2, bench/scenarios.py worker_kill)"
+    },
+    {
+      "text": "2",
+      "category": "protocol",
+      "source": "HTTP/2, which gRPC runs on (DESIGN.md 4.3); cgroup version 2 (DESIGN.md 10.7, common/cgroup.py)"
+    },
+    {
+      "text": "2",
+      "category": "derived",
+      "source": "2L, the link delay paid up and down (DESIGN.md 6.3); the base of the log-scale buckets, 2^(i/8) at 8 buckets per octave (DESIGN.md 10.1, common/histogram.py)"
+    },
+    {
+      "text": "3",
+      "category": "brief",
+      "source": "3 robots in the disconnect demo and the sweep's second robot count (the brief's Demonstration; DESIGN.md 2, 6.5, 9.3, 9.4, 11.2, 11.4; bench/scenarios.py disconnect, SWEEP_ROBOT_COUNTS in bench/runplan.py); the brief's \"at least 3 concurrent robots\", which the robot-fleet examples of DESIGN.md 15 and the README use, and the section 12 experiment at 3 robots"
+    },
+    {
+      "text": "3.14",
+      "category": "design",
+      "source": "Python 3.14 (DESIGN.md 1.1, 4.1, README; the Dockerfile's base image python:3.14-slim, requires-python in pyproject.toml)"
+    },
+    {
+      "text": "4",
+      "category": "brief",
+      "source": "the memory limit, 4 GB, read as 4 GiB with no swap (the brief's Runtime Constraints; A24; DESIGN.md 1.1, 1.2, 3, 8.3, 15; EXPECTED_LIMITS in bench/gates.py, mem_limit in docker-compose.yml; README)"
+    },
+    {
+      "text": "4",
+      "category": "design",
+      "source": "batch size 4 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the depth_cap_4 candidate's cap 4 (DESIGN.md 12, bench/candidates.py); the relative threshold of a comparison, 4% of the A median (DESIGN.md 12, MIN_EFFECT_SHARE in bench/candidates.py)"
+    },
+    {
+      "text": "5",
+      "category": "brief",
+      "source": "5 robots for the latency breakdown and the sweep's third robot count (the brief's Design Document and Demonstration; DESIGN.md contents, 2, 6.5, 7, 9.3, 11.2, 11.4; SWEEP_ROBOT_COUNTS in bench/runplan.py); the section 12 experiment at 5 robots"
+    },
+    {
+      "text": "5",
+      "category": "assumption",
+      "source": "A13: the memory leak is judged over a 5-minute soak (DESIGN.md 2, 3, 9.5, 11.2; bench/scenarios.py soak, 300 s)"
+    },
+    {
+      "text": "5.19",
+      "category": "protocol",
+      "source": "Linux 5.19, the first kernel whose cgroup v2 has memory.peak (DESIGN.md 10.7, common/cgroup.py)"
+    },
+    {
+      "text": "8",
+      "category": "design",
+      "source": "8 buckets per octave in the time histograms (DESIGN.md 10.1, BUCKETS_PER_OCTAVE in common/histogram.py); batch size 8, the largest calibrated size (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py)"
+    },
+    {
+      "text": "9",
+      "category": "derived",
+      "source": "the width of one histogram bucket, about 9% = 2^(1/8) - 1 at 8 buckets per octave (DESIGN.md 10.1, 13; common/histogram.py)"
+    },
+    {
+      "text": "10",
+      "category": "brief",
+      "source": "the late joiner's 10 s alone before B joins (the brief's Demonstration; DESIGN.md 2, 9.2, 11.2; bench/scenarios.py late_joiner); 10 robots, the sweep's largest count (the brief's Demonstration; DESIGN.md 2, 6.5, 9.3, 11.2, 11.4; SWEEP_ROBOT_COUNTS in bench/runplan.py)"
+    },
+    {
+      "text": "10",
+      "category": "design",
+      "source": "the round trip, as a share of the classifier's service time, above which shared memory is reconsidered: about 10% (DESIGN.md 4.5)"
+    },
+    {
+      "text": "15",
+      "category": "derived",
+      "source": "the depth displacement budget: 1 m/s x 150 ms = 15 cm (DESIGN.md 5.2, common/thresholds.py)"
+    },
+    {
+      "text": "20",
+      "category": "brief",
+      "source": "the late joiner's 20 s more after B joins; the disconnect demo's 20 s before the kill and 20 s more after it (the brief's Demonstration; DESIGN.md 2, 9.2, 9.4, 11.2; bench/scenarios.py late_joiner, disconnect)"
+    },
+    {
+      "text": "20",
+      "category": "design",
+      "source": "the worker_kill scenario's kill of the depth worker at 20 s (DESIGN.md 11.2; bench/scenarios.py worker_kill)"
+    },
+    {
+      "text": "30",
+      "category": "brief",
+      "source": "30 fps per robot (the brief's Problem Statement and Demonstration; DESIGN.md 1.1, 1.2, 2, 3, 4.1, 4.3, 5.1, 6.3 f and H1, H2, 6.5, 9.1, 9.5, 11.2, 13, 14; frame_rate_hz in cloud/config.py and robot/settings.py; README); 30 s for the steady, sweep and massive demos (the brief's Demonstration; DESIGN.md 2, 9.1, 9.3, 9.5, 11.2, 15; bench/scenarios.py), which the robot-fleet examples run for too (DESIGN.md 15, README; the banner in cloud/main.py, the robots command of docker-compose.split.yml)"
+    },
+    {
+      "text": "30",
+      "category": "assumption",
+      "source": "A6: a robot's tick k is captured at t0 + k/30 s; A16: every demo sends 30 fps on the wire (DESIGN.md 1.2, 3)"
+    },
+    {
+      "text": "30",
+      "category": "derived",
+      "source": "the late joiner's end, 10 s + 20 s = 30 s (DESIGN.md 2, 9.2, 11.2; bench/scenarios.py late_joiner)"
+    },
+    {
+      "text": "40",
+      "category": "derived",
+      "source": "the disconnect demo's end, 20 s + 20 s = 40 s (DESIGN.md 2, 9.4, 11.2; bench/scenarios.py disconnect); the worker_kill scenario's end, 20 s + 20 s (DESIGN.md 11.2; bench/scenarios.py worker_kill)"
+    },
+    {
+      "text": "50",
+      "category": "brief",
+      "source": "50 concurrent robots (the brief's Demonstration, Massive connections, and its Design Document's \"at 50 robots\"; DESIGN.md contents and 2, 3, 4, 5.1, 6.3 H7, 6.5, 8, 9.5, 9.6, 11.2, 11.5, 12; bench/scenarios.py massive and soak, the WebSocket benchmark of the model_bench scenario)"
+    },
+    {
+      "text": "60",
+      "category": "brief",
+      "source": "no memory leaks over 60 seconds of continuous streaming (the brief's Non-Functional Requirements; A13; DESIGN.md 2, 3)"
+    },
+    {
+      "text": "60",
+      "category": "design",
+      "source": "the highest frame rate a robot may declare in the handshake, 60 frames per second (DESIGN.md 13; MAX_FRAME_RATE_HZ in common/protocol.py)"
+    },
+    {
+      "text": "64",
+      "category": "design",
+      "source": "the default connection cap, 64 (DESIGN.md 8.1, ServerConfig.max_connections in cloud/config.py)"
+    },
+    {
+      "text": "100",
+      "category": "design",
+      "source": "the CPU quota period, 100 ms by default: the period of the CFS quota that the compose files' cpus setting applies, which they leave at its default (DESIGN.md 6.3 P; the pacing headroom comment in cloud/config.py)"
+    },
+    {
+      "text": "150",
+      "category": "design",
+      "source": "the depth stale threshold, 150 ms (A9; DESIGN.md 2, 5.2; DEFAULT_STALE_MS in common/thresholds.py)"
+    },
+    {
+      "text": "200",
+      "category": "protocol",
+      "source": "HTTP 200, the /healthz answer while the gateway is ready (DESIGN.md 10, README; health_reply in cloud/metrics.py)"
+    },
+    {
+      "text": "224",
+      "category": "brief",
+      "source": "the MobileNetV3-small input size, 224x224 (the brief's model table; DESIGN.md 1.1, 4.6; INPUT_SIDE_PX in workers/models/mobilenet.py)"
+    },
+    {
+      "text": "256",
+      "category": "brief",
+      "source": "the MiDaS-small input size, 256x256 (the brief's model table; DESIGN.md 1.1; INPUT_SIDE_PX in workers/models/midas.py)"
+    },
+    {
+      "text": "256",
+      "category": "design",
+      "source": "the shorter side MobileNetV3's frames are resized to before the 224 crop, 256 px (DESIGN.md 4.6, RESIZED_SHORTER_SIDE_PX in workers/models/mobilenet.py)"
+    },
+    {
+      "text": "300",
+      "category": "derived",
+      "source": "the depth watchdog limit, 300 ms = 2 x the 150 ms stale threshold (DESIGN.md 5.2, DEFAULT_WATCHDOG_MS in common/thresholds.py)"
+    },
+    {
+      "text": "480",
+      "category": "brief",
+      "source": "the frame height, 480 px of 640x480 (the brief's Problem Statement; DESIGN.md 1.1, README; FRAME_HEIGHT_PX in common/protocol.py)"
+    },
+    {
+      "text": "500",
+      "category": "design",
+      "source": "the classification stale threshold, 500 ms (A9; DESIGN.md 2, 5.2; DEFAULT_STALE_MS in common/thresholds.py)"
+    },
+    {
+      "text": "503",
+      "category": "protocol",
+      "source": "HTTP 503: a refused upgrade, a busy or unreadable /metrics, an unready /healthz (DESIGN.md 4.3, 5.1, 10, README; cloud/gateway.py, health_reply in cloud/metrics.py)"
+    },
+    {
+      "text": "640",
+      "category": "brief",
+      "source": "the frame width, 640 px of 640x480 (the brief's Problem Statement; DESIGN.md 1.1, README; FRAME_WIDTH_PX in common/protocol.py)"
+    },
+    {
+      "text": "1000",
+      "category": "protocol",
+      "source": "WebSocket close code 1000, normal (DESIGN.md 4.3, CloseCode.NORMAL in common/protocol.py)"
+    },
+    {
+      "text": "1000",
+      "category": "derived",
+      "source": "1000 ms per second in the formulas tau = 1000 / f, K_m = 1000 x s_m / c_m, G_m(N) = 1000 / x_m(N) (DESIGN.md 6.3) and in the loop's saturation point, 1000 / (30 x the CPU-ms per frame) robots (DESIGN.md 4.1, 14)"
+    },
+    {
+      "text": "1001",
+      "category": "protocol",
+      "source": "WebSocket close code 1001, server shutdown (DESIGN.md 4.3, CloseCode.SERVER_SHUTDOWN in common/protocol.py)"
+    },
+    {
+      "text": "1002",
+      "category": "protocol",
+      "source": "WebSocket close code 1002, protocol error (DESIGN.md 4.3, CloseCode.PROTOCOL_ERROR in common/protocol.py)"
+    },
+    {
+      "text": "1007",
+      "category": "protocol",
+      "source": "WebSocket close code 1007, invalid payload data (DESIGN.md 4.3, _INVALID_DATA_CODE in cloud/sessions.py)"
+    },
+    {
+      "text": "1008",
+      "category": "protocol",
+      "source": "WebSocket close code 1008, policy (DESIGN.md 4.3, CloseCode.POLICY in common/protocol.py)"
+    },
+    {
+      "text": "1009",
+      "category": "protocol",
+      "source": "WebSocket close code 1009, message too big (DESIGN.md 4.3, CloseCode.MESSAGE_TOO_BIG in common/protocol.py)"
+    },
+    {
+      "text": "1013",
+      "category": "protocol",
+      "source": "WebSocket close code 1013, over the connection cap (DESIGN.md 4.3, 8.1; CloseCode.OVER_CAPACITY in common/protocol.py)"
+    },
+    {
+      "text": "1500",
+      "category": "derived",
+      "source": "the frames per second into the gateway at 50 robots: 50 x 30 fps (DESIGN.md 2, 4.1)"
+    },
+    {
+      "text": "4001",
+      "category": "protocol",
+      "source": "close code 4001, session replaced (DESIGN.md 1.4, 4.3; CloseCode.SESSION_REPLACED in common/protocol.py)"
+    },
+    {
+      "text": "4002",
+      "category": "protocol",
+      "source": "close code 4002, slow consumer, reserved and not sent (DESIGN.md 4.3, CloseCode.SLOW_CONSUMER in common/protocol.py)"
+    },
+    {
+      "text": "4003",
+      "category": "protocol",
+      "source": "close code 4003, idle timeout (DESIGN.md 4.3, CloseCode.IDLE_TIMEOUT in common/protocol.py)"
+    },
+    {
+      "text": "8080",
+      "category": "design",
+      "source": "the gateway's port, 8080 (DESIGN.md 15, README; ServerConfig.port in cloud/config.py, the ports of docker-compose.yml and docker-compose.split.yml)"
+    },
+    {
+      "text": "60 000",
+      "category": "design",
+      "source": "the upper end of the time histograms, 60 000 ms (DESIGN.md 10.1, RANGE_MAX_MS in common/histogram.py)"
+    }
+  ],
+  "identifiers": [
+    "A1",
+    "A10",
+    "A11",
+    "A12",
+    "A13",
+    "A14",
+    "A15",
+    "A16",
+    "A17",
+    "A18",
+    "A19",
+    "A2",
+    "A20",
+    "A21",
+    "A22",
+    "A23",
+    "A24",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+    "A9",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "H7",
+    "H8",
+    "INT8",
+    "MobileNetV3",
+    "Q1",
+    "Q1a",
+    "Q1b",
+    "Q1c",
+    "Q2",
+    "Q3",
+    "Q4",
+    "R1",
+    "R2",
+    "R3",
+    "T1",
+    "breakdown_n5",
+    "cls_cap_1",
+    "depth_cap_2",
+    "depth_cap_4",
+    "e2e_ms",
+    "iproute2",
+    "model_sha256",
+    "n5",
+    "p50",
+    "p95",
+    "p99",
+    "sha256",
+    "share_1",
+    "sweep_n1",
+    "sweep_n10",
+    "sweep_n3",
+    "sweep_n5",
+    "t0",
+    "v1",
+    "v2"
+  ]
+}

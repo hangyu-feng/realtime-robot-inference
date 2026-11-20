@@ -1,6 +1,6 @@
 # Design: real-time inference for a robot fleet
 
-> **Status: skeleton.** This document fixes the structure, the claims, the experiments and the metrics contract before the system is built. Nothing in it has been measured. Every measured value is written as a fact key in double braces and will be filled from files under `results/` written by gated benchmark runs. A run is gated when the tests pass, the image builds, and the container reports the 2-CPU and 4 GB limits from inside. Every statement about performance below is a hypothesis until its placeholder is filled.
+> **Status: skeleton.** This document fixes the structure, the claims, the experiments and the metrics contract before the system is built. Nothing in it has been measured by a gated run yet. Every measured value is written as a fact key in double braces and will be filled from files under `results/` written by gated benchmark runs. A run is gated when five gates pass: the test suite passes inside the image the run uses, with no skipped test (the tests that need the host's docker CLI are not selected); the image was built in the same invocation and every container of the run has its digest; the container reports the 2-CPU and 4 GB limits, and no swap, from inside; the run starts in fresh containers that accepted no connection before it began; and the configuration the gateway reports in `/metrics` is the one the run was planned with. Every run records a digest of the code that decides what it does, its commit, and whether the working tree was dirty. A fact counts only gated runs of the planned spec and code digest, and states how many of them come from a dirty tree. An interrupted or failed run is kept as an attempt and counted, never used. Every statement about performance below is a hypothesis until its placeholder is filled.
 
 Status labels used in this document:
 
@@ -114,7 +114,7 @@ The path of one frame, with the latency stage each step produces (section 7 defi
 
 ## 2. Evidence plan
 
-One row per design question of the brief (Q), per demo (D), for the topology comparison (T) and for two non-functional requirements (R). Scenarios are defined in section 11, metric fields in section 10. Every status is "planned" until its runs exist.
+One row per design question of the brief (Q), per demo (D), for the topology comparison (T) and for three non-functional requirements (R). Scenarios are defined in section 11, metric fields in section 10. Every status is "planned" until its runs exist.
 
 | ID | Claim | Strongest objection | Experiment | Metric fields | Plot or table | Status |
 |---|---|---|---|---|---|---|
@@ -122,16 +122,17 @@ One row per design question of the brief (Q), per demo (D), for the topology com
 | Q1b Transport | WebSocket over TCP fits this container: message framing, close codes and an HTTP endpoint on one port, at an uplink cost of `{{massive.stage.transport_up_ms.p50}}` ms per frame. Its weakness, head-of-line blocking, needs packet loss and so does not appear at 50 robots on loopback. | TCP delivers every frame in order, including frames that are already stale. Datagrams would let stale data die in the network. | `massive`; delay sweep with the link model; a loss run with `tc netem` in the `split` topology if a root container with NET_ADMIN is added for it | `stages.<m>.transport_up_ms`, `robots.<id>.models.<m>.frames_overwritten`, telemetry `freshness_ms` | `delay_sweep.png`, `massive.md` | planned |
 | Q1c Batcher | A pull-based scheduler with a measured batch cap fits one inference thread per model. The cap is the largest calibrated batch size whose batch time fits the model's freshness budget, and batch size 1 is measured against it: `{{model_bench.cls.batch_cap}}` for classification and `{{model_bench.depth.batch_cap}}` for depth. | On one inference thread a larger batch may add latency without adding throughput. | `model_bench`; the comparison of batch cap 1 against the default cap; batch-size distributions from `sweep` | `workers.<m>.t_b_ms`, `workers.<m>.t_b_cpu_ms`, `models.<m>.batch_size`, `models.<m>.batch_ms` | `model_tb.png`, `sweep_batch_size.png` | planned |
 | Q2 Frame management | One newest-frame slot per robot with late binding keeps freshness bounded at any load: at most one frame period of slot wait, plus one service time, plus overhead. Thresholds are 150 ms for depth and 500 ms for classification. Stale ratio in the steady demo: `{{steady.depth.stale_ratio}}` for depth and `{{steady.cls.stale_ratio}}` for classification. | A short FIFO queue is simpler and loses fewer frames. And 150 ms may be out of reach for depth on slower hardware. | `steady` under latest-wins and under FIFO; stale ratio against threshold from per-command samples; the depth margin reported at startup | telemetry `freshness_ms`, `commands_stale`; `frames_overwritten`; `workers.depth.margin_ms` | `fifo_vs_latest.png`, `stale_ratio_vs_threshold.png` | planned |
-| Q3 Batch, scheduling, scaling | Per-robot throughput of a model stays at 30 fps while its utilization (demand over measured capacity) is below 1, and falls as capacity over N above that. The inflection is at N* = capacity / 30: `{{sweep.cls.inflection_n}}` robots for classification and `{{sweep.depth.inflection_n}}` for depth. The CPU share per model, the CPU cost per frame and the pacing share move it. | The inflection point is a property of the test machine, not of the design. | `sweep`; the capacity model run before the sweep; the candidates in section 12 that change share or cost | `robots.<id>.models.<m>.commands_sent`, telemetry `freshness_ms`, `models.<m>.batch_size`, `models.<m>.busy_ms`, `cgroup.cpu_usage_us`, `cgroup.throttled_us` | `sweep_throughput.png`, `sweep_freshness.png`, `sweep_batch_size.png`, `sweep_cpu.png`, `predicted_vs_measured.md` | planned |
+| Q3 Batch, scheduling, scaling | Per-robot throughput of a model stays at 30 fps while its utilization (demand over measured capacity) is below 1, and falls as capacity over N above that. The inflection is at N* = capacity / 30: `{{sweep.cls.inflection_n}}` robots (`{{sweep.cls.inflection_between}}`) for classification and `{{sweep.depth.inflection_n}}` (`{{sweep.depth.inflection_between}}`) for depth. The CPU share per model, the CPU cost per frame and the pacing share move it. | The inflection point is a property of the test machine, not of the design. | `sweep` and `massive`; the capacity model run before the sweep; the candidates in section 12 that change share or cost | `robots.<id>.models.<m>.commands_sent`, telemetry `freshness_ms`, `models.<m>.batch_size`, `models.<m>.busy_ms`, `cgroup.cpu_usage_us`, `cgroup.throttled_us` | `sweep_throughput.png`, `sweep_freshness.png`, `sweep_batch_size.png`, `sweep_cpu.png`, `predicted_vs_measured.md` | planned |
 | Q4 Latency breakdown | At 5 robots the stage means add up to the end-to-end mean, with a residual of `{{sweep.n5.depth.residual_ms.mean}}` ms for depth and `{{sweep.n5.cls.residual_ms.mean}}` ms for classification. The largest stage and the biggest optimization opportunity are read from this table. | Timers in different processes do not add up, and percentiles of stages cannot be summed. | `sweep` at 5 robots; every command carries its stage durations; sums use means and tails are reported per stage | `stages.<m>.*`, telemetry `fire_lag_ms`, `deliver_ms`, per-command samples | `breakdown_n5.png`, `breakdown_n5.md` | planned |
 | D1 Steady load | With 1 robot at 30 fps for 30 s, freshness stays bounded: no upward trend, and p50, p95, p99 and max are reported per model. | 30 s is too short to show drift, and a maximum can hide a slowly growing queue. | `steady`, repeated; a trend test of freshness against time; `soak` covers the long run | telemetry `freshness_ms`; per-command samples | `steady_freshness.png`, `steady.md` | planned |
 | D2 Late joiner | When B joins, capacity is split evenly at once: A and B end with the same per-robot throughput on each model, and A's p95 freshness does not change. | The newcomer gets a burst, or the incumbent keeps an advantage. | `late_joiner`; windows 0 to 10 s and 10 to 30 s | per-robot `commands_sent` and telemetry `freshness_ms`, per window | `late_joiner_throughput.png`, `late_joiner.md` | planned |
-| D3 Scaling sweep | The sweep shows per-robot throughput, p50 and p95 freshness, the batch-size distribution per model and CPU utilization at 1, 3, 5 and 10 robots, against predictions written before the runs. | The results depend on how robot phases line up and on the simulator sharing the CPU. | `sweep` with random phases (default) and with aligned phases; `single` and `split` | as Q3, plus telemetry `fire_lag_ms` | the four sweep plots, `sweep.md` | planned |
+| D3 Scaling sweep | The sweep shows per-robot throughput, p50 and p95 freshness, the batch-size distribution per model and CPU utilization at 1, 3, 5 and 10 robots, against the capacity model's predictions, which no demo run feeds (section 6.3). | The results depend on how robot phases line up and on the simulator sharing the CPU. | `sweep` with random phases; `single` and `split`; aligned phases are a planned experiment (section 12) | as Q3, plus telemetry `fire_lag_ms` | the four sweep plots, `sweep.md` | planned |
 | D4 Disconnect | After one of 3 robots is killed with SIGKILL at 20 s, the survivors' depth throughput rises as the freed share is redistributed, nothing errors, and the dead robot's state is released. | A dead peer that never closes its socket keeps its share or leaks state. | `disconnect`; windows 0 to 20 s and 20 to 40 s; a SIGSTOP integration test covers the half-open case | per-robot `commands_sent` per window, `connections.closed`, `frames_dropped_disconnect`, `cgroup.memory_*` | `disconnect_throughput.png`, `disconnect.md` | planned |
 | D5 Massive connections | 50 robots for 30 s: no crash, flat memory, and no robot starved. Per-robot command rates stay close together on each model, and every command gap stays within the scheduler's bound. | Equal shares of too little is still starvation: a command that arrives too rarely cannot control a robot. | `massive`, repeated; `soak` for memory; watchdog coverage reported per model | `robots.<id>.models.<m>.commands_sent`, `max_service_gap_ms`; telemetry `watchdog_expired_ms`; `cgroup.memory_anon_bytes`, `cgroup.memory_sock_bytes`; `connections.*` | `massive_fairness.png`, `massive_memory.png`, `coverage_vs_watchdog.png`, `massive.md` | planned |
 | T1 Topology | Running the simulator inside the limited container costs the system `{{massive.fleet.cpu_cores}}` cores at 50 robots. The `split` topology runs the cloud alone under the quota with the same pacing reserve, and shows what the simulator does to timing and throttling. | In production the robots are elsewhere, so a co-located simulator distorts both capacity and timing. | every scenario in `single` and in `split`, in alternating order | fleet `processes`, telemetry `fire_lag_ms`, all freshness and throughput fields | `topology.md` | planned |
 | R1 Bounded resources | Memory does not grow: the slope is `{{soak.memory.slope_mb_per_min}}` MB per minute over 5 minutes at 50 robots, and fd and task counts stay flat. | Slow leaks (per-robot metrics, reconnect churn) do not show in 60 s. | `soak`; the reconnect-churn integration test | `cgroup.memory_anon_bytes`, `cgroup.memory_sock_bytes`, `processes.<p>.fds`, `loop.tasks` | `soak_memory.png` | planned |
 | R2 Disconnect and reconnect | A robot that disconnects or reconnects does not affect the others: a frozen robot is closed by the idle timeout and comes back under a new session, and the other robots' classification rate stays close to its rate before. | A reconnect storm resets fairness or leaks sessions. | the frozen-robot reconnect integration test (SIGSTOP); the churn integration test | `connections.*`, per-robot rates, `robots.<id>.session` | `faults.md` | planned |
+| R3 Worker failure | A worker that dies is restarted, and the other model keeps serving: after the depth worker is killed with SIGKILL, depth commands arrive again `{{worker_kill.depth.outage_ms}}` ms later, and classification serves `{{worker_kill.before.cls.commands_per_s_per_robot.mean}}` commands/s per robot before the kill and `{{worker_kill.after.cls.commands_per_s_per_robot.mean}}` after it. | A restart that loads and calibrates the model again leaves the robots without depth commands for seconds, and its warm-up competes with the classifier for the quota. | `worker_kill`; the killed-worker, inference-timeout and gateway-death integration tests | `workers.<m>.state`, `workers.<m>.restarts`, `workers.<m>.pid`, `robots.<id>.models.<m>.frames_failed`, per-robot rates | `faults.md` | planned |
 
 ## 3. Assumptions
 
@@ -141,7 +142,7 @@ The brief leaves these open. Each assumption is also written in the code at the 
 |---|---|---|
 | A1 | The robot simulator runs in the same container as the cloud by default (`single` topology). A `split` topology with robots in their own container is also supported and measured. | The brief says the entire system must run in one container. |
 | A2 | Every frame is offered to both models. A robot can subscribe to one model in the handshake. The two command streams are independent and have separate statistics. | The brief says both models are deployed and frames are routed to models, but not how. |
-| A3 | A command is a small structure derived from the model output. Classification: top-1 class and confidence. Depth: proximity of the left, center and right zones, mapped to steering and speed. The depth map is not sent back. The robot "acts" by updating a simulated state and logging. | The brief says results function as control commands. |
+| A3 | A command is a small structure derived from the model output. Classification: top-1 class and confidence. Depth: proximity of the left, center and right zones, mapped to steering and speed. The depth map is not sent back. The robot "acts" by making an accepted command the one in effect, which its watchdog expires when no newer one arrives in time; it counts accepted, stale and out-of-order commands and records each in its samples, and logs none of them one by one. | The brief says results function as control commands. |
 | A4 | The frame number and capture time travel in the message header, not inside the JPEG. | "Each frame carrying its frame number and capture time." |
 | A5 | Frames are encoded once at startup and cycled. | A real robot encodes on its own hardware. Encoding 30 fps per robot inside the 2 CPUs would measure the simulator. |
 | A6 | Capture time is the scheduled tick time, t0 + k/30 s, not the actual send time. | A late simulator must not hide latency (no coordinated omission). The difference is reported as `fire_lag`. |
@@ -162,6 +163,7 @@ The brief leaves these open. Each assumption is also written in the code at the 
 | A21 | TLS and real authentication are out of scope. Plain `ws` runs inside the container. | The brief is about scheduling under load. |
 | A22 | Robot ids are unique. A second connection with the same id replaces the first session. | The brief does not cover identity. |
 | A23 | Frames are synthetic. Their content sets the JPEG size, which affects transport and decode cost. The frame set is fixed, and its size statistics are recorded with every run. | The brief asks for synthetic frames. |
+| A24 | The memory limit of 4 GB is 4 GiB of memory with no swap: the container's memory limit and its memory-plus-swap limit are equal. The run's gate compares the limits read inside the container with these values exactly, as it compares the CPU quota of A19; where the kernel does not report the swap limit, the run is not gated. | The brief states the memory limit without its unit base or a swap setting. |
 
 ## 4. Tool choice
 
@@ -357,7 +359,7 @@ Measured on the test machine (`model_tb.png`):
 
 Times in ms. Depth batches above 1 use the patched graph.
 
-The batch-size distribution depends on how robot phases line up. With random phases (the default) an unsaturated classifier mostly sees one frame at a time. With all robots in phase it sees N at once. Both are shown.
+The batch-size distribution depends on how robot phases line up. With random phases (the default) an unsaturated classifier mostly sees one frame at a time. With all robots in phase it would see N at once; aligned phases are a planned experiment (section 12), not part of the default evidence.
 
 ### 6.3 Capacity model
 
@@ -395,7 +397,7 @@ Formulas:
 | Peak command age | A_m(N) = F_m + G_m(N) |
 | Watchdog coverage | 1 - min(1, max(0, A_m(N) - W_m) / G_m(N)) |
 | Robots served within the watchdog limit | the largest N with A_m(N) <= W_m |
-| Longest command gap (bound) | tau + (ceil(N / b_m) + 1) x C_m, plus the skip rule's interval when the skip rule is on. C_m is the longest cycle from one dispatch to the next while frames are pending: the batch time plus the dispatch round trip, or the batch's CPU time over the pacing share when that is longer. N counts every robot connected at some time during the run, because a robot that joins goes ahead of the others once. It holds when every robot sends every frame period, no worker fails and no command is dropped from a downlink queue, and it also covers the wait from connect to the first command when the robot's first frame reaches the gateway within one frame period of the connect. The scheduler's property tests assert it, and runs are checked against it |
+| Longest command gap (bound) | tau + (ceil(N / b_m) + 1) x C_m, plus the skip rule's interval when the skip rule is on. C_m is the longest cycle from one dispatch to the next while frames are pending: the batch time plus the dispatch round trip, or the batch's CPU time over the pacing share when that is longer. N counts every robot connected at some time during the run, because a robot that joins goes ahead of the others once. It holds when every robot sends every frame period, no worker fails and no command is dropped from a downlink queue, and it also covers the wait from connect to the first command when the robot's first frame reaches the gateway within one frame period of the connect. The scheduler's property tests assert it. A run is checked with its own dispatch times: C_m is then the mean of that run's longest ceil(N / b_m) + 1 consecutive cycles, and the skip rule's interval is added only when a frame was skipped |
 | Quota freeze per period | P x (1 - Q / D) when D > Q, else 0 |
 
 Under late binding the freshness floor of a saturated model does not depend on N. Only the command interval does. That is the design's central claim, and the sweep and the massive demo test it.
@@ -407,7 +409,7 @@ Hypotheses that the model and the design rest on. Each is confirmed or refuted b
 | ID | Hypothesis | Settled by |
 |---|---|---|
 | H1 | On one thread, depth capacity is below 30 frames/s, so depth is saturated from the first robot. | `model_bench`, `steady` |
-| H2 | On one thread, classification capacity covers several robots at 30 fps, so its inflection point falls inside or near the sweep range. | `model_bench`, `sweep` |
+| H2 | On one thread, classification capacity covers several robots at 30 fps, so its inflection point falls inside or near the sweep range. | `model_bench`, `sweep`, `massive` |
 | H3 | On one thread, the per-frame time of neither model falls with batch size, so a larger cap costs freshness without adding throughput unless the dispatch cost is large. | `model_bench`, batch-caps candidate |
 | H4 | For a saturated model, freshness does not depend on N. | `sweep`, `massive` |
 | H5 | Two saturated inference threads plus I/O exceed the quota at high N, and without pacing the kernel freezes the whole container for part of each period. | `massive` with pacing on and off |
@@ -415,7 +417,7 @@ Hypotheses that the model and the design rest on. Each is confirmed or refuted b
 | H7 | Python frame I/O at 50 robots uses a small share of one core. | `massive` |
 | H8 | A second depth thread shortens the service time but raises CPU-ms per frame. | `model_bench`, 2-thread candidate |
 
-Predictions for the five demos are produced by running the real scheduler code under a simulated clock, with the measured T(b) as service times. They are written into the tables of section 9 before the first end-to-end run. Each gap between prediction and measurement that exceeds run-to-run spread is explained in `predicted_vs_measured.md`.
+Predictions for the five demos are produced by running the real scheduler code under a simulated clock (`bench/capacity_model.py`). Every measured input comes from the model benchmark alone: the batch times T(b) in wall and CPU time, the dispatch round trip and its CPU cost, and the WebSocket round trip and its CPU cost per frame. The simulated gateway computes the pacing share from the configured I/O cost per frame, as the gateway does (section 6.4); the measured cost enters only the predicted CPU demand. No demo run feeds a prediction, so no prediction is fitted to the measurement it is compared with. The tables of section 9 show the predictions computed from the gated model benchmark. Preliminary predictions, computed from the batch times of a container spike, were committed before the first end-to-end run, and the git history keeps them. `predicted_vs_measured.md` sets each prediction beside its measurement, with the gap and the run-to-run spread, and marks every gap larger than the spread for explanation. The explanation is written in the text of this document, at the claim the prediction concerns.
 
 The model is an idealization, and its limits are stated before the first end-to-end run. Each batch takes the mean wall and CPU time that the model benchmark measured for its size with the worker alone in the container. Each transport and dispatch leg is a constant, set to the whole measured round trip that contains it, which is an upper bound. Robots send exactly on their ticks. The model has no spread in service time, no fire lag, no slowdown of a worker beside the other busy processes, no quota freeze, and no gateway work beyond the measured I/O cost. Its percentiles therefore spread only with frame phase and scheduling. The predicted p95, p99 and max carry no spread from service time or fire lag, so the measured tails are expected at or above them, to within the run-to-run spread of the batch time, and the measured maximum well above. The predicted throughput of a saturated model is a ceiling, to within the same spread. The predicted CPU demand counts the workers and the frame I/O only. Below saturation the classifier's freshness and batch size depend on the phase offsets drawn for a run, so those predictions hold for one draw. After the first end-to-end run a prediction changes only through its model-benchmark inputs; a change to the model's code, or to the scheduler code and defaults it runs, that moves a prediction is listed in section 13 with the predictions before and after it.
 
@@ -430,14 +432,14 @@ The model is an idealization, and its limits are stated before the first end-to-
 
 ### 6.5 The inflection point
 
-From the sweep:
+From the sweep and the 50-robot run:
 
-| Model | Measured capacity (frames/s) | Inflection N* | Utilization at 1 / 3 / 5 / 10 robots |
-|---|---|---|---|
-| `cls` | `{{sweep.cls.capacity_fps}}` | `{{sweep.cls.inflection_n}}` | `{{sweep.n1.cls.utilization}}` / `{{sweep.n3.cls.utilization}}` / `{{sweep.n5.cls.utilization}}` / `{{sweep.n10.cls.utilization}}` |
-| `depth` | `{{sweep.depth.capacity_fps}}` | `{{sweep.depth.inflection_n}}` | `{{sweep.n1.depth.utilization}}` / `{{sweep.n3.depth.utilization}}` / `{{sweep.n5.depth.utilization}}` / `{{sweep.n10.depth.utilization}}` |
+| Model | Capacity at the first saturated point (frames/s) | Inflection N* | Utilization crosses 1 | Utilization at 1 / 3 / 5 / 10 robots |
+|---|---|---|---|---|
+| `cls` | `{{sweep.cls.capacity_fps}}` | `{{sweep.cls.inflection_n}}` | `{{sweep.cls.inflection_between}}` | `{{sweep.n1.cls.utilization}}` / `{{sweep.n3.cls.utilization}}` / `{{sweep.n5.cls.utilization}}` / `{{sweep.n10.cls.utilization}}` |
+| `depth` | `{{sweep.depth.capacity_fps}}` | `{{sweep.depth.inflection_n}}` | `{{sweep.depth.inflection_between}}` | `{{sweep.n1.depth.utilization}}` / `{{sweep.n3.depth.utilization}}` / `{{sweep.n5.depth.utilization}}` / `{{sweep.n10.depth.utilization}}` |
 
-Why there: a model's per-robot throughput leaves 30 fps when its worker's utilization reaches 1. The absolute N depends on the hardware, so the explanation is given as utilization, which carries across machines. For the paced depth worker the share, and with it capacity and utilization, depends on N; each is computed with the share in effect at that robot count.
+Why there: a model's per-robot throughput leaves 30 fps when its worker's utilization reaches 1. The absolute N depends on the hardware, so the explanation is given as utilization, which carries across machines. For the paced depth worker the share, and with it capacity and utilization, depends on N; each is computed with the share in effect at that robot count. Capacity is computed per run from that run's CPU cost per frame and share, so it differs between robot counts: the classifier's cost per frame falls as its batches fill. N* uses the capacity of the first scale point that is saturated; where the sweep does not reach saturation, the 50-robot run supplies that point and the sweep gives only the lower end of the bracket.
 
 What moves it, with the experiment that measures each:
 
@@ -476,6 +478,7 @@ How the sum is checked:
 - Every command carries its server-side stage durations back to the robot, so one robot-side record holds the whole breakdown.
 - Sums use means, because means add and percentiles do not. The residual is the mean end-to-end time minus the sum of the stage means, and it is shown as its own row. On a shared clock the residual of each command is below one microsecond by construction, so a larger one means a boundary was stamped twice or not at all. Without a shared clock `transport_up` is an estimate and the residual is real.
 - Tails are reported per stage as p50 and p95.
+- Each model's stage rows, sum, end-to-end mean and residual come from one run, the run whose end-to-end mean is the median over the runs, because medians taken stage by stage come from different runs and do not add up. The end-to-end p50 and p95 are medians over the runs, as in section 9. Cells are rounded for display; the residual is computed before rounding.
 
 | Stage | `cls` mean | `cls` p50 | `cls` p95 | `depth` mean | `depth` p50 | `depth` p95 |
 |---|---|---|---|---|---|---|
@@ -535,7 +538,7 @@ The leak signal is anonymous plus socket memory. `memory.current` also counts pa
 
 ## 9. The five demos
 
-Each demo is a scenario of section 11.2, run several times as gated runs, in both topologies. The tables show the `single` topology. Predicted values are written before the first run. The predicted values below are preliminary: the capacity model (`bench/capacity_model.py`) computed them from the batch times of a container spike on the test machine, before the first end-to-end run, and the gated model benchmark will recompute them.
+Each demo is a scenario of section 11.2, run several times as gated runs, in both topologies. The tables show the `single` topology. The predicted values come from the capacity model (`bench/capacity_model.py`), fed by the gated model benchmark alone; no demo run feeds it (section 6.3). Preliminary predictions, computed from the batch times of a container spike on the test machine, were committed before the first end-to-end run; the git history keeps them.
 
 ### 9.1 Freshness under steady load
 
@@ -543,17 +546,17 @@ Each demo is a scenario of section 11.2, run several times as gated runs, in bot
 - **Assertions.** Freshness shows no upward trend. The frame conservation identities hold.
 - **Evidence.** `steady_freshness.png` (freshness of every command against time, per model, with the thresholds marked), `steady.md`.
 
-| Quantity | `cls` predicted (preliminary) | `cls` measured | `depth` predicted (preliminary) | `depth` measured |
+| Quantity | `cls` predicted | `cls` measured | `depth` predicted | `depth` measured |
 |---|---|---|---|---|
-| Freshness p50 (ms) | 3.03 | `{{steady.cls.freshness_ms.p50}}` | 84.3 | `{{steady.depth.freshness_ms.p50}}` |
-| Freshness p95 (ms) | 3.03 | `{{steady.cls.freshness_ms.p95}}` | 99.4 | `{{steady.depth.freshness_ms.p95}}` |
-| Freshness p99 (ms) | 3.03 | `{{steady.cls.freshness_ms.p99}}` | 101 | `{{steady.depth.freshness_ms.p99}}` |
-| Freshness max (ms) | 3.03 | `{{steady.cls.freshness_ms.max}}` | 101 | `{{steady.depth.freshness_ms.max}}` |
-| Commands per second | 30.0 | `{{steady.cls.commands_per_s}}` | 14.8 | `{{steady.depth.commands_per_s}}` |
+| Freshness p50 (ms) | `{{predict.steady.cls.freshness_ms.p50}}` | `{{steady.cls.freshness_ms.p50}}` | `{{predict.steady.depth.freshness_ms.p50}}` | `{{steady.depth.freshness_ms.p50}}` |
+| Freshness p95 (ms) | `{{predict.steady.cls.freshness_ms.p95}}` | `{{steady.cls.freshness_ms.p95}}` | `{{predict.steady.depth.freshness_ms.p95}}` | `{{steady.depth.freshness_ms.p95}}` |
+| Freshness p99 (ms) | `{{predict.steady.cls.freshness_ms.p99}}` | `{{steady.cls.freshness_ms.p99}}` | `{{predict.steady.depth.freshness_ms.p99}}` | `{{steady.depth.freshness_ms.p99}}` |
+| Freshness max (ms) | `{{predict.steady.cls.freshness_ms.max}}` | `{{steady.cls.freshness_ms.max}}` | `{{predict.steady.depth.freshness_ms.max}}` | `{{steady.depth.freshness_ms.max}}` |
+| Commands per second | `{{predict.steady.cls.commands_per_s}}` | `{{steady.cls.commands_per_s}}` | `{{predict.steady.depth.commands_per_s}}` | `{{steady.depth.commands_per_s}}` |
 | Freshness trend (ms per s) | 0 | `{{steady.cls.freshness_trend_ms_per_s}}` | 0 | `{{steady.depth.freshness_trend_ms_per_s}}` |
-| Peak command age p95 (ms) | 36.4 | `{{steady.cls.command_age_peak_ms.p95}}` | 167 | `{{steady.depth.command_age_peak_ms.p95}}` |
+| Peak command age p95 (ms) | `{{predict.steady.cls.command_age_peak_ms.p95}}` | `{{steady.cls.command_age_peak_ms.p95}}` | `{{predict.steady.depth.command_age_peak_ms.p95}}` | `{{steady.depth.command_age_peak_ms.p95}}` |
 
-The predicted p95, p99 and max carry no service-time spread and no fire lag (section 6.3).
+The predicted p95, p99 and max carry no service-time spread and no fire lag (section 6.3). `steady_from_metrics.md` rebuilds every measured cell of this table but the freshness trend from each counted run's `/metrics` scrapes alone, and shows whether each agrees with the value from the samples within what `/metrics` resolves (section 10.1).
 
 ### 9.2 Late joiner
 
@@ -566,9 +569,9 @@ The predicted p95, p99 and max carry no service-time spread and no fire lag (sec
 | A | before, 0 to 10 s | `{{late_joiner.before.a.cls.commands_per_s}}` | `{{late_joiner.before.a.cls.freshness_ms.p95}}` | `{{late_joiner.before.a.depth.commands_per_s}}` | `{{late_joiner.before.a.depth.freshness_ms.p95}}` |
 | A | after, 10 to 30 s | `{{late_joiner.after.a.cls.commands_per_s}}` | `{{late_joiner.after.a.cls.freshness_ms.p95}}` | `{{late_joiner.after.a.depth.commands_per_s}}` | `{{late_joiner.after.a.depth.freshness_ms.p95}}` |
 | B | after, 10 to 30 s | `{{late_joiner.after.b.cls.commands_per_s}}` | `{{late_joiner.after.b.cls.freshness_ms.p95}}` | `{{late_joiner.after.b.depth.commands_per_s}}` | `{{late_joiner.after.b.depth.freshness_ms.p95}}` |
-| A, predicted (preliminary) | after | 30.0 | | 7.40 | |
+| A, predicted | after | `{{predict.late_joiner.after.a.cls.commands_per_s}}` | | `{{predict.late_joiner.after.a.depth.commands_per_s}}` | |
 
-Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}` s.
+B's first depth command arrives `{{late_joiner.b.depth.first_command_ms}}` ms after it joins. Time for A and B to settle at equal depth rates, counted in 1 s bins: `{{late_joiner.depth.settle_s}}` s.
 
 ### 9.3 Scaling sweep
 
@@ -576,12 +579,12 @@ Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}
 - **Assertions.** The conservation identities hold. Per-robot rates within one run are equal on each model, within run-to-run spread.
 - **Evidence.** `sweep_throughput.png`, `sweep_freshness.png`, `sweep_batch_size.png`, `sweep_cpu.png`, each with the predicted curve drawn in; `sweep.md`. The inflection point is discussed in section 6.5.
 
-| Robots | `cls` commands/s per robot (predicted, preliminary / measured) | `cls` freshness p50 / p95 (ms) | `depth` commands/s per robot (predicted, preliminary / measured) | `depth` freshness p50 / p95 (ms) |
+| Robots | `cls` commands/s per robot (predicted / measured) | `cls` freshness p50 / p95 (ms) | `depth` commands/s per robot (predicted / measured) | `depth` freshness p50 / p95 (ms) |
 |---|---|---|---|---|
-| 1 | 30.0 / `{{sweep.n1.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n1.cls.freshness_ms.p50}}` / `{{sweep.n1.cls.freshness_ms.p95}}` | 14.8 / `{{sweep.n1.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n1.depth.freshness_ms.p50}}` / `{{sweep.n1.depth.freshness_ms.p95}}` |
-| 3 | 30.0 / `{{sweep.n3.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n3.cls.freshness_ms.p50}}` / `{{sweep.n3.cls.freshness_ms.p95}}` | 4.92 / `{{sweep.n3.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n3.depth.freshness_ms.p50}}` / `{{sweep.n3.depth.freshness_ms.p95}}` |
-| 5 | 30.0 / `{{sweep.n5.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n5.cls.freshness_ms.p50}}` / `{{sweep.n5.cls.freshness_ms.p95}}` | 2.95 / `{{sweep.n5.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n5.depth.freshness_ms.p50}}` / `{{sweep.n5.depth.freshness_ms.p95}}` |
-| 10 | 30.0 / `{{sweep.n10.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n10.cls.freshness_ms.p50}}` / `{{sweep.n10.cls.freshness_ms.p95}}` | 1.48 / `{{sweep.n10.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n10.depth.freshness_ms.p50}}` / `{{sweep.n10.depth.freshness_ms.p95}}` |
+| 1 | `{{predict.sweep.n1.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n1.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n1.cls.freshness_ms.p50}}` / `{{sweep.n1.cls.freshness_ms.p95}}` | `{{predict.sweep.n1.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n1.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n1.depth.freshness_ms.p50}}` / `{{sweep.n1.depth.freshness_ms.p95}}` |
+| 3 | `{{predict.sweep.n3.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n3.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n3.cls.freshness_ms.p50}}` / `{{sweep.n3.cls.freshness_ms.p95}}` | `{{predict.sweep.n3.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n3.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n3.depth.freshness_ms.p50}}` / `{{sweep.n3.depth.freshness_ms.p95}}` |
+| 5 | `{{predict.sweep.n5.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n5.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n5.cls.freshness_ms.p50}}` / `{{sweep.n5.cls.freshness_ms.p95}}` | `{{predict.sweep.n5.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n5.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n5.depth.freshness_ms.p50}}` / `{{sweep.n5.depth.freshness_ms.p95}}` |
+| 10 | `{{predict.sweep.n10.cls.commands_per_s_per_robot.mean}}` / `{{sweep.n10.cls.commands_per_s_per_robot.mean}}` | `{{sweep.n10.cls.freshness_ms.p50}}` / `{{sweep.n10.cls.freshness_ms.p95}}` | `{{predict.sweep.n10.depth.commands_per_s_per_robot.mean}}` / `{{sweep.n10.depth.commands_per_s_per_robot.mean}}` | `{{sweep.n10.depth.freshness_ms.p50}}` / `{{sweep.n10.depth.freshness_ms.p95}}` |
 
 | Robots | `cls` mean batch size | `cls` share of batches of 1 | `depth` mean batch size | CPU utilization (of 2 CPUs) | Throttled (ms per s) |
 |---|---|---|---|---|---|
@@ -602,9 +605,9 @@ Time for A and B to settle at equal depth rates: `{{late_joiner.depth.settle_s}}
 | Survivors' `cls` commands/s per robot | `{{disconnect.before.survivors.cls.commands_per_s_per_robot}}` | `{{disconnect.after.survivors.cls.commands_per_s_per_robot}}` |
 | Survivors' `depth` p95 freshness (ms) | `{{disconnect.before.survivors.depth.freshness_ms.p95}}` | `{{disconnect.after.survivors.depth.freshness_ms.p95}}` |
 | Survivors' `cls` p95 freshness (ms) | `{{disconnect.before.survivors.cls.freshness_ms.p95}}` | `{{disconnect.after.survivors.cls.freshness_ms.p95}}` |
-| Predicted survivors' `depth` commands/s per robot (preliminary) | 4.93 | 7.40 |
+| Predicted survivors' `depth` commands/s per robot | `{{predict.disconnect.before.survivors.depth.commands_per_s_per_robot}}` | `{{predict.disconnect.after.survivors.depth.commands_per_s_per_robot}}` |
 
-Time from the kill until the server closes the connection: `{{disconnect.detect_ms}}` ms. Time until the survivors' depth rate settles: `{{disconnect.depth.recovery_s}}` s.
+Time from the kill until the server closes the connection: `{{disconnect.detect_ms}}` ms. Time until the survivors' depth rate settles, counted in 1 s bins: `{{disconnect.depth.recovery_s}}` s.
 
 ### 9.5 Massive connections
 
@@ -615,7 +618,7 @@ Time from the kill until the server closes the connection: `{{disconnect.detect_
 | Quantity | `cls` | `depth` |
 |---|---|---|
 | Commands/s per robot, min / mean / max | `{{massive.cls.commands_per_s_per_robot.min}}` / `{{massive.cls.commands_per_s_per_robot.mean}}` / `{{massive.cls.commands_per_s_per_robot.max}}` | `{{massive.depth.commands_per_s_per_robot.min}}` / `{{massive.depth.commands_per_s_per_robot.mean}}` / `{{massive.depth.commands_per_s_per_robot.max}}` |
-| Predicted commands/s per robot (preliminary) | 8.60 | 0.200 |
+| Predicted commands/s per robot | `{{predict.massive.cls.commands_per_s_per_robot.mean}}` | `{{predict.massive.depth.commands_per_s_per_robot.mean}}` |
 | Lowest over mean rate | `{{massive.cls.fairness.min_over_mean}}` | `{{massive.depth.fairness.min_over_mean}}` |
 | Jain index | `{{massive.cls.fairness.jain}}` | `{{massive.depth.fairness.jain}}` |
 | Longest command gap (ms), measured / bound | `{{massive.cls.command_gap_ms.max}}` / `{{massive.cls.command_gap_bound_ms}}` | `{{massive.depth.command_gap_ms.max}}` / `{{massive.depth.command_gap_bound_ms}}` |
@@ -629,7 +632,7 @@ Time from the kill until the server closes the connection: `{{disconnect.detect_
 | CPU utilization (of 2 CPUs) | `{{massive.cpu.utilization}}` |
 | Throttled (ms per s) | `{{massive.cpu.throttled_ms_per_s}}` |
 | Simulator fire lag p99 (ms) | `{{massive.fleet.fire_lag_ms.p99}}` |
-| Memory, anonymous + socket, start / end (MB) | `{{massive.memory.anon_sock_mb_start}}` / `{{massive.memory.anon_sock_mb_end}}` |
+| Memory, anonymous + socket, after the connections settle / at the end (MB) | `{{massive.memory.anon_sock_mb_start}}` / `{{massive.memory.anon_sock_mb_end}}` |
 | Memory slope over the 5-minute soak (MB per minute) | `{{soak.memory.slope_mb_per_min}}` |
 | Change in fd count / task count over the soak | `{{soak.fds.delta}}` / `{{soak.tasks.delta}}` |
 
@@ -850,7 +853,7 @@ Every accepted session ends once, with one reason, so `accepted = current + sum(
 | `fds` | int | gauge | Open file descriptors |
 | `nice` | int | gauge | |
 
-The robot fleet is not a child of the gateway. The runner records the same fields for it in each scrape line (section 11.3).
+The robot fleet is not a child of the gateway. The scenario driver, which runs beside the fleet, records the same fields for every fleet process and for itself in each scrape line (section 11.3).
 
 `loop`:
 
@@ -893,17 +896,27 @@ The robot fleet is not a child of the gateway. The runner records the same field
 
 ```
 results/
-  raw/<scenario>/<run>/     one directory per run (section 11.3)
-  summary/facts.json        every number this document uses (section 11.4)
-  tables/*.md               generated tables
-  plots/*.png               generated plots
-  ledger.jsonl              one line per optimization attempt (section 12)
+  raw/<scenario_key>/<run_id>/              one directory per evidence run (section 11.3)
+  raw/<scenario_key>/<run_id>.attempt<k>/   an interrupted or failed attempt, kept
+  raw/compare/<candidate>/<arm>/<run_id>/   comparison runs (section 12), never used for a demo fact
+  gates/                                    the test gate's output and its parsed result, per image and code digest
+  summary/facts.json                        every number this document uses (section 11.4)
+  summary/t_b.json                          the capacity model's input, from the model benchmark
+  summary/predictions.json                  the capacity model's predictions
+  summary/excluded.json                     every run directory that is not counted, with its reasons
+  summary/failed_checks.json                counted runs with a failed check
+  tables/*.md                               generated tables
+  plots/*.png                               generated plots
+  ledger.jsonl                              one line per candidate (section 12)
 ```
 
-- A run id is derived from the run's config and its repeat index. A finished run is skipped when the scenario is run again, so an interrupted sweep resumes.
-- Each run happens in a fresh container.
-- Aggregation, plotting and table generation are separate steps that only read `results/raw/`.
-- Per-command samples are large and are not committed. Everything else is.
+- The results root is `results/` in the repository. The environment variable `RRI_RESULTS` moves it; the make targets and the compose files follow it.
+- A run is identified by its run spec: scenario key, topology, phase mode, model set, the resolved server config, the link model, the hash of any extra compose file, the candidate and arm of a comparison, the code digest and the repeat index. The run id joins the topology, a hash of the spec without the repeat index and the code digest, a prefix of the code digest and the repeat index. The seed follows from the repeat index. A change to the code or to any setting gives new run ids.
+- The code digest is a hash over the files that decide what a run does: the source of the gateway, the workers, the robots, the shared code and the scripts, the modules of the runner and the scenario driver, the Dockerfile, the compose files and the list of packages the image installs. Each run also records its commit and whether those files differ from it.
+- Resume. A run directory with a valid `DONE` is finished and is skipped, whatever the state of its summary. A directory without one is renamed to the next free attempt and its spec runs again. Attempts are never deleted, and aggregation counts them. After a code change, `make evidence` produces a complete new set.
+- Each run happens in fresh containers: before it starts, the runner removes every container of the project.
+- Aggregation, tables and plots read only the summaries, `summary/` and the ledger, never samples or scrapes; the one exception is `steady_from_metrics.md` (section 11.5), which reads the scrapes of the counted `steady` runs to show that `/metrics` alone gives the table of section 9.1. A run's summary is written once the run is finished, and can be written again without redoing the run: when the summarizer changes, `make report` first writes the summary of each finished run again from the run's files and samples, and aggregation stops when the summary of a counted run was written by another version of the summarizer.
+- Per-command samples (`samples/`) are large and are not committed. Everything else is, including the scrapes, which are compressed.
 
 ### 11.2 Scenarios
 
@@ -911,58 +924,88 @@ results/
 |---|---|---|---|
 | `steady` | 1 | 30 s | D1, Q2 |
 | `late_joiner` | 2 | A from 0 s, B joins at 10 s, end at 30 s | D2 |
-| `sweep` | 1, 3, 5, 10 (separate runs) | 30 s each | D3, Q3, Q4 (the 5-robot runs) |
+| `sweep_n1`, `sweep_n3`, `sweep_n5`, `sweep_n10` | 1, 3, 5, 10 (one scenario key each) | 30 s each | D3, Q3, Q4 (the 5-robot runs) |
 | `disconnect` | 3 | SIGKILL of one robot process at 20 s, end at 40 s | D4 |
+| `worker_kill` | 2 | SIGKILL of the depth worker at 20 s, end at 40 s | R3 |
 | `massive` | 50 | 30 s | D5, Q1 |
 | `soak` | 50 | 5 minutes | R1 |
-| `model_bench` | none | Batch time per model, batch size and thread count; decode and preprocess; dispatch round trip | Q1c, Q3, section 6.2 |
+| `model_bench` | none; always on the real models, first in each repeat | Batch time per model, batch size and thread count; decode, preprocess and postprocess; the dispatch round trip; a WebSocket run of 50 robots at 30 fps with no model loaded, for the I/O cost per frame and the round trip. Each command runs in its own container with the image's limits | Q1c, Q3, section 6.2; the only measured input of the predictions (section 6.3) |
 
-Every scenario takes a topology (`single` or `split`), a phase mode (random by default, or aligned), a model set (real by default, `fake` with a fixed service time, or `null`) and overrides of the server config. The experiments of section 12 are these scenarios with one override each, except the FIFO control, which also turns the skip rule off: the configuration refuses the skip rule on a queue. Overrides reach the gateway and its workers through the environment variable `RRI_OVERRIDES`, a JSON object over the defaults; the topology comes from `RRI_TOPOLOGY`, which each compose file sets. A run with changed settings starts a fresh container with them, and `/metrics` echoes the effective configuration.
+Every scenario takes a topology (`single` or `split`), a phase mode, a model set and overrides of the server config. The phase mode is random: each robot's phase is drawn from the run's seed. Aligned phases are a planned experiment (section 12), not part of the default evidence. The model sets are `real` (the published models), `fake` (a fixed service time per frame and no model file) and `null` (a result at once, which isolates transport and scheduling). The experiments of section 12 are these scenarios with one override each, except the FIFO control, which also turns the skip rule off: the configuration refuses the skip rule on a queue. Overrides reach the gateway and its workers through the environment variable `RRI_OVERRIDES`, a JSON object over the defaults; the topology comes from `RRI_TOPOLOGY`, which each compose file sets. A run with changed settings starts a fresh container with them, and `/metrics` echoes the effective configuration.
+
+Order. The evidence runs `REPEATS` repeats, three by default. Each repeat runs `model_bench` first, then `steady`, `late_joiner`, the sweep, `disconnect`, `worker_kill`, `massive` and `soak`. The sweep's robot counts run in increasing order in odd repeats and in decreasing order in even ones. Each serving scenario runs in both topologies, `single` first in odd repeats and `split` first in even ones, so two repeats give the order A B B A (section 9.6).
 
 ### 11.3 Files written by one run
 
 | File | Committed | Content |
 |---|---|---|
-| `config.json` | yes | Scenario, run id, repeat index, topology, seed. Robots: count, frame rate, phase mode, subscribed models, stale thresholds, watchdog limits, link model (delay and jitter per direction). The full server config. The planned event times. |
-| `env.json` | yes | CPU model and visible CPU count, machine architecture, kernel, container engine and version, cgroup version, the limits as read inside the container. Python and package versions. Model file hashes. Frame set: count, JPEG quality, smallest, mean and largest size in bytes. Git commit, dirty flag, image digest. Start time in UTC. |
-| `gate.json` | yes | `tests_passed` (with the commit and the counts), `image_built` (with the digest), `limits_ok` (expected and read values), and `gated`, which is true only when all three are. |
-| `scrapes.jsonl` | yes | One line per second: time since run start, the full `/metrics` object, and a `fleet` object with the `processes` fields for the robot fleet and, in the `split` topology, the `cgroup` fields of the robots' container. |
-| `events.jsonl` | yes | One line per event with its time since run start: `server_ready`, `robot_start`, `robot_join`, `robot_kill`, `robot_stop`, `fault`, `scenario_end`. |
+| `config.json` | yes | The run spec: scenario key, topology, phase mode, model set, the resolved server config, the link model (delay and jitter per direction), the extra compose file and its hash, candidate and arm (null outside a comparison), the code digest and the repeat index. The run id and the seed. Robots: count, frame rate, subscribed models, stale thresholds, watchdog limits, planned start and stop. The windows, the planned event times relative to t0, and the worker that the scenario kills with its planned time, null in every scenario but `worker_kill`. `hand_run`, true when the scenario driver was started by hand and wrote this file itself; such a run has no run spec and is never counted. |
+| `env.json` | yes | CPU model and visible CPU count, the cpuset, machine architecture, kernel, the host's total memory, container engine and version, cgroup version, the limits as read inside the container. Python and package versions. Model file hashes. Frame set: count, JPEG quality, smallest, mean and largest size in bytes. Git commit, dirty flag, code digest, image digest. Start time in UTC. In the `split` topology, the limits of the robots' container. |
+| `env_inside.json` | yes | What the scenario driver read inside the container at the start: cgroup limits, CPU model, kernel, packages, model hashes, frame-set statistics. `env.json` takes its inside fields from it. |
+| `gate.json` | yes | Five gates and `gated`, which is true only when all five pass. `tests_passed`: the test suite in this image for this code digest, with the commit, the dirty flag, the counts, and the gate file under `results/gates/` with the hash of its output; it passes when nothing failed and nothing was skipped (the tests that need the host's docker CLI are not selected). `image_built`: the image built in this invocation, its digest, and the image of every container of the run. `limits_ok`: the CPU, memory and swap limits, expected and read. `fresh`: every container of the run is new, and no connection was accepted before t0. `config_ok`: the config echo of the first successful scrape (section 10.8), apart from `version`, equals the resolved server config in `config.json`, with the paths that differ; null for `model_bench`, which starts no gateway. A run whose gate fails still writes its files and `DONE`. |
+| `plans/` | yes | The plan file of each fleet process: t0, the duration, and each robot's start and stop. A robot that the scenario kills runs alone in its own process, with its own seed, and only the kill ends it. |
+| `events.jsonl` | yes | One line per event, with its time in seconds relative to t0. The first line is `t0`, which also holds t0 on the shared monotonic clock. Then `server_ready` (from the gateway's own clock, so before t0), `robot_start`, `robot_join`, `robot_kill`, `robot_stop`, `scenario_end`, `final_poll` (whether the final poll settled and how long it took), and, in `worker_kill` runs, `fault`: the model and the pid of the worker killed, at the time read in the gateway's container right after the kill; the runner adds this line once the driver has finished. |
+| `scrapes.jsonl.gz` | yes | Gzip, one line per scrape: at t0 plus every whole second, from one second before t0 to the end, then a final scrape after a bounded wait for every robot to disconnect and send its last telemetry. Each line: the planned second, the driver's clock just before the request and just after the response, whether the scrape succeeded, the full `/metrics` object, and a `fleet` object with the `processes` fields of every fleet process and of the scenario driver and, in the `split` topology, the `cgroup` fields of the robots' container. |
 | `summary.json` | yes | Everything aggregation needs, below. |
+| `reports/*.json` | yes | `model_bench` only: one report per benchmark command, each from its own container with the image's limits. That run writes `config.json`, `env.json` (built from the reports' environment blocks), `gate.json`, these reports, `DONE` and `summary.json`; its `fresh` gate checks only that every container was new. |
 | `samples/robot_<id>.npz` | no | Per command: session, model, frame number, capture time, send time, receive time, gateway result time, applied or the reject reason, batch size, every stage duration. Per tick: frame number, scheduled time, actual send time, and the outcome: sent, skipped because the previous frame was unsent, or passed because the simulator woke late. A robot killed with SIGKILL leaves no file. |
-| `DONE` | yes | Empty. Written last, so an interrupted run is recognizable. |
+| `DONE` | yes | Written by the runner once the other files of the run are complete: the hash of every file of the run except `samples/` and `summary.json`, and, apart, the hash of `summary.json`, which is updated when the summary is written again. A directory without a valid `DONE` is an attempt (section 11.1). |
 
 `summary.json`:
 
 | Key | Content |
 |---|---|
+| `summarizer_digest` | Hash of `bench/summarize.py` and every module of this repository it imports; a summary with another digest is written again by `make report`, from the run's files and samples, before the run can count |
 | `run` | Scenario, run id, repeat, topology, duration, whether gated |
-| `validity` | Fire lag p99 and whether the run is simulator-limited, throttled time per second, whether the conservation identities held, notes |
-| `windows` | Named time windows: `all` for every scenario, `before` and `after` for `late_joiner` and `disconnect` |
-| `models.<m>.<window>` | Robots; commands per second in total and per robot (min, mean, max); non-stale commands per second per robot; freshness p50, p95, p99, max and mean, exact from samples; stale count and ratio; out-of-order count; command gap p50, p95 and max; peak command age p50, p95 and max; watchdog coverage (min, mean); fairness (Jain index, lowest over mean); batch-size distribution and mean; batch time p50 and p95; measured capacity and utilization; per stage: mean, p50, p95; end-to-end mean, stage sum, residual |
+| `validity` | Fire lag p99 and whether the run is simulator-limited, the count of each tick outcome, throttled time per second, whether the conservation identities held, whether the gateway's clock lay between the driver's readings around the first scrape, failed scrapes, samples dropped, whether the final scrape settled, notes |
+| `windows` | Named time windows: `all` for every scenario, `before` and `after` for `late_joiner` and `disconnect`; for each, `span_s`, the time between the two scrapes its counter rates are taken over |
+| `models.<m>.<window>` | Robots; commands per second in total and per robot (min, mean, max); applied commands per second per robot; freshness p50, p95, p99, max and mean, exact from samples, and `freshness_trend_ms_per_s`, its least-squares slope against receive time; stale count and ratio; out-of-order count; command gap p50, p95 and max, and the open interval before each robot's first command (`first_gap`); peak command age p50, p95 and max; watchdog coverage (min, mean); fairness (Jain index, lowest over mean); batch-size distribution and mean; batch time p50 and p95; measured capacity and utilization; per stage: mean, p50, p95, p99; end-to-end mean, stage sum, residual |
 | `models.<m>.curves` | Freshness counts in 1 ms bins, and peak command age in 1 ms bins weighted by time, for the two curves of section 5.3 |
-| `robots.<id>.<m>.<window>` | Commands per second; freshness p50, p95, p99, max; stale count; longest command gap; watchdog coverage |
-| `cpu.<window>` | Utilization (cgroup usage over the limit), cores per process, throttled time per second, share of periods throttled |
-| `memory` | Anonymous plus socket memory at start and end, its slope, the peak, RSS per process |
-| `connections` | Accepted, closed by reason, rejected by reason |
+| `stage_all.<stage>` | Each stage over both models' commands pooled, with `transport_up` and `fire_lag` counted once per frame |
+| `gateway.<window>` | Gateway CPU in cores, CPU-ms per frame received, event-loop lag p99, bytes received per second |
+| `robots.<id>.<m>.<window>` | Commands per second; freshness p50, p95, p99, max; stale count; longest command gap; the open interval before its first command; watchdog coverage |
+| `survivors.<m>.<window>` | Scenarios that kill a robot: commands per second per surviving robot, and freshness p95 over the survivors' commands |
+| `fault` | `worker_kill` runs, null in the others: the model and the pid killed, the planned and the actual kill time and how late the kill was, the outage (from the kill to the first command of that model, over every robot, whose batch was dispatched after the kill), and the change in each worker's `restarts` between the scrape before t0 and the final scrape |
+| `cpu.<window>` | Utilization (cgroup usage over the limit), cores per process (gateway, both workers, every fleet process, the scenario driver), throttled time per second, share of periods throttled; in the `split` topology, the cores of the robots' container |
+| `memory` | Anonymous plus socket memory once the connections have settled and at the end, its slope between the two, the peak, socket memory and RSS per process at the end, the change in open file descriptors and in event-loop tasks between the same two scrapes |
+| `connections` | Accepted, closed by reason, rejected by reason, from the scrape before t0 to the final scrape |
+| `series` | For the plots: in `steady`, the freshness of every command against time; per robot and model, commands in each second from t0; anonymous plus socket memory at each scrape |
 | `checks` | Name, passed and observed value, for each demo check |
+
+Every quantity in this table is defined in `bench/summarize.py`, where it is computed. Five definitions change what a number means. A command belongs to a window when its receive time does, and a tick when its capture time does. A rate from a counter is its difference over the actual time between the two scrapes that bound the window (`span_s`), while a command rate is the count of samples over the window's length. The longest command gap and the peak command age include the open intervals at the edges: from the later of the window's start and the robot's start to its first command, and from its last command to the earlier of the window's end and the robot's stop. Watchdog coverage counts the time before the first applied command as uncovered. Batch statistics come from differences of scrapes, so their time resolution is one second.
 
 ### 11.4 Fact keys
 
-`results/summary/facts.json` maps each key to a value (the median over the gated repeats), its unit, the number of runs, the lowest and highest value, and the run ids. This document is rendered from a template in which every measured value is one of these keys. A check fails if the rendered document is out of date, or if the template contains a number that is not a declared design constant.
+`results/summary/facts.json` holds the model set, the code digest, the ids of the counted runs, and one fact per key. A fact is the median over its counted runs, with its unit, the number of runs, the lowest and highest value, the run ids, how many of them come from a dirty tree, the failed checks of each run, and the number of attempts and failed attempts behind it. Some keys are not medians. A statistic that is itself a maximum or a minimum (a key that ends in `max` or `min`, and `fairness.min_over_mean`) takes the largest or the smallest run value, so a reported extreme is the extreme of every counted run. `command_gap_bound_ms` takes the smallest of the runs' bounds, so the longest gap shown beside it is compared with the tightest bound of any run. The Breakdown keys of a model all come from one run, the run whose end-to-end mean is the median, so that the stage means add up (section 7). A fact that is a string takes the latest run's value. A run with a failed check is counted, not dropped: this document reports what was measured, and `summary/failed_checks.json` lists the failures. Every key of the registry in `bench/facts.py` is present; a key with no counted run is null.
+
+Which runs count. For a demo fact, the runs whose spec, apart from the repeat index and the seed, is the evidence plan's spec for that scenario key and topology on the model set and the code digest, with a valid `DONE`, all five gates passed, and not started by hand. Every other run directory is listed in `summary/excluded.json` with each reason that applies. Comparison runs feed only the ledger (section 12).
+
+Two digest modes. In `current` mode, used by `make report` and `make numbers`, the code digest is computed from the working tree, so evidence from other code is not counted and the check says whether the evidence matches the code. In `recorded` mode, used by `make check`, the runs that `facts.json` recorded as counted are the runs counted, with their summaries as they are, so a code change alone does not fail the check of committed evidence. In `current` mode aggregation refuses to replace facts recorded for other code when no run of the working tree's code counts; `make report DIGEST=recorded` renders the recorded evidence again.
+
+This document is rendered from a template, `docs/DESIGN.tmpl.md`. In it every measured value is a fact key in double braces, alone or as the whole of a code span, and every number that is not measured is a design constant, written as its literal. `docs/constants.json` declares each constant: its text, which is a single numeric literal; its category, one of brief, protocol, design, assumption or derived; and its source, the sentence of the brief, the protocol constant, the section of this document, the assumption or the formula over other constants that decides it. A value measured anywhere is never a constant. The check compares literals, not meanings: a number typed by hand passes when it equals a declared literal. The same file lists the identifiers with a digit that may stand in the text: assumption, question and demo ids, statistics, segments of fact keys, and names.
+
+The number check fails, and prints where, when any of these holds:
+
+1. A rendered file differs from rendering its template now.
+2. `facts.json`, the tables or the ledger differ from what aggregation and table generation produce now from the same results.
+3. The template holds a character with a numeric value outside a placeholder, other than a heading's section number when the headings are numbered in order, a number in a reference to a section that exists, an ordered-list number that is its position in the list, a declared identifier, or a numeric literal equal to a declared constant's text; or it holds a character reference written with an ampersand and a hash sign.
+4. A constant's text is not one numeric literal, or its category is not one of the five.
+
+A null fact renders as n/a: it means no counted run, or a key computed across runs that has no answer. On the real model set `make report` exits with an error while a key that this document uses is null; on the other model sets it only lists those keys.
 
 Key form: `<scenario>.<subject>.<metric>`, with an optional window or robot-count segment after the scenario and an optional statistic at the end. A `split.` prefix selects the `split` topology; without it the `single` topology is meant. A `predict.` prefix selects the capacity model's prediction for the same key. `<m>` is `cls` or `depth`.
 
 | Family | Keys |
 |---|---|
 | Steady | `steady.<m>.freshness_ms.{p50,p95,p99,max}`, `steady.<m>.commands_per_s`, `steady.<m>.commands_received`, `steady.<m>.stale_count`, `steady.<m>.stale_ratio`, `steady.<m>.out_of_order_count`, `steady.<m>.freshness_trend_ms_per_s`, `steady.<m>.command_age_peak_ms.p95` |
-| Late joiner | `late_joiner.{before.a,after.a,after.b}.<m>.commands_per_s`, `late_joiner.{before.a,after.a,after.b}.<m>.freshness_ms.p95`, `late_joiner.<m>.settle_s` |
-| Sweep | `sweep.n{1,3,5,10}.<m>.commands_per_s_per_robot.{min,mean,max}`, `sweep.n{1,3,5,10}.<m>.freshness_ms.{p50,p95}`, `sweep.n{1,3,5,10}.<m>.batch_size.{mean,share_1}`, `sweep.n{1,3,5,10}.<m>.utilization`, `sweep.n{1,3,5,10}.cpu.{utilization,throttled_ms_per_s}`, `sweep.<m>.capacity_fps`, `sweep.<m>.inflection_n` |
+| Late joiner | `late_joiner.{before.a,after.a,after.b}.<m>.commands_per_s`, `late_joiner.{before.a,after.a,after.b}.<m>.freshness_ms.p95`, `late_joiner.<m>.settle_s`, `late_joiner.b.<m>.first_command_ms` |
+| Sweep | `sweep.n{1,3,5,10}.<m>.commands_per_s_per_robot.{min,mean,max}`, `sweep.n{1,3,5,10}.<m>.freshness_ms.{p50,p95}`, `sweep.n{1,3,5,10}.<m>.batch_size.{mean,share_1}`, `sweep.n{1,3,5,10}.<m>.utilization`, `sweep.n{1,3,5,10}.cpu.{utilization,throttled_ms_per_s}`, `sweep.<m>.capacity_fps`, `sweep.<m>.inflection_n`, `sweep.<m>.inflection_between` |
 | Breakdown | `sweep.n5.<m>.stage.<stage>_ms.{mean,p50,p95}` for the ten stages of section 7, `sweep.n5.<m>.stage_sum_ms.mean`, `sweep.n5.<m>.e2e_ms.mean`, `sweep.n5.<m>.residual_ms.mean` |
 | Disconnect | `disconnect.{before,after}.survivors.<m>.commands_per_s_per_robot`, `disconnect.{before,after}.survivors.<m>.freshness_ms.p95`, `disconnect.<m>.recovery_s`, `disconnect.detect_ms` |
+| Worker kill | `worker_kill.depth.outage_ms`, `worker_kill.{before,after}.<m>.commands_per_s_per_robot.mean` |
 | Massive | `massive.<m>.commands_per_s_per_robot.{min,mean,max}`, `massive.<m>.commands_received`, `massive.<m>.fairness.{jain,min_over_mean}`, `massive.<m>.command_gap_ms.max`, `massive.<m>.command_gap_bound_ms`, `massive.<m>.freshness_ms.{p50,p95,p99,max}`, `massive.<m>.stale_count`, `massive.<m>.stale_ratio`, `massive.<m>.out_of_order_count`, `massive.<m>.watchdog_coverage.{min,mean}`, `massive.<m>.useful_robots`, `massive.stage.transport_up_ms.{p50,p99}`, `massive.stage.dispatch_rt_ms.p50`, `massive.cpu.{utilization,throttled_ms_per_s}`, `massive.bytes_in_per_s`, `massive.connections.{accepted,rejected}` |
 | Massive, per process | `massive.gateway.{cpu_cores,cpu_ms_per_frame,rss_mb}`, `massive.gateway.loop_lag_ms.p99`, `massive.fleet.{cpu_cores,rss_mb}`, `massive.fleet.fire_lag_ms.p99`, `massive.worker_cls.rss_mb`, `massive.worker_depth.rss_mb`, `massive.memory.{anon_sock_mb_start,anon_sock_mb_end,sock_mb}` |
-| Soak | `soak.memory.slope_mb_per_min`, `soak.fds.delta`, `soak.tasks.delta` |
+| Soak | `soak.memory.slope_mb_per_min`, `soak.fds.delta`, `soak.tasks.delta`, `soak.<m>.fairness.{jain,min_over_mean}`, `soak.<m>.commands_per_s_per_robot.{min,mean,max}` |
 | Model bench | `model_bench.<m>.t{1,2}.b{1,2,4,8}.{wall_ms,cpu_ms}`, `model_bench.<m>.batch_cap`, `model_bench.depth.margin_ms`, `model_bench.decode.{full_ms,half_ms}`, `model_bench.<m>.preprocess_ms`, `model_bench.<m>.postprocess_ms`, `model_bench.dispatch_rt_ms` |
 | Experiments | `ledger.<candidate>.outcome`, `ledger.<candidate>.main_delta`, `ledger.<candidate>.baseline_spread` |
 | Environment | `env.cpu_model`, `env.kernel`, `env.engine`, `env.repeats` |
@@ -973,7 +1016,7 @@ Key form: `<scenario>.<subject>.<metric>`, with an optional window or robot-coun
 |---|---|
 | `steady_freshness.png` | Freshness of every command against time, per model, with rolling p95 and the thresholds |
 | `late_joiner_throughput.png` | Per-robot commands per second over time, per model, with the join marked |
-| `sweep_throughput.png` | Per-robot throughput against robot count, per model, measured points and predicted curve |
+| `sweep_throughput.png` | Per-robot throughput against robot count, per model, measured points (the sweep's four counts and the 50-robot run) and predicted curve |
 | `sweep_freshness.png` | Freshness p50 and p95 against robot count, per model, measured and predicted |
 | `sweep_batch_size.png` | Batch-size distribution per model at each robot count |
 | `sweep_cpu.png` | CPU utilization against robot count: total, per process, and throttled time |
@@ -987,31 +1030,44 @@ Key form: `<scenario>.<subject>.<metric>`, with an optional window or robot-coun
 | `fifo_vs_latest.png` | Freshness over time under the FIFO control and under latest-wins |
 | `delay_sweep.png` | Freshness and stale ratio against injected one-way delay |
 | `steady.md`, `late_joiner.md`, `sweep.md`, `disconnect.md`, `massive.md` | The demo tables of section 9 |
+| `steady_from_metrics.md` | The table of section 9.1 rebuilt for each counted `steady` run from its `/metrics` scrapes alone, each cell beside the value from the samples, with whether the two agree within what `/metrics` resolves |
 | `breakdown_n5.md` | The table of section 7 |
-| `predicted_vs_measured.md` | Every prediction next to its measurement, with the gap and its explanation |
+| `predicted_vs_measured.md` | Every prediction next to its measurement, with the gap and the run-to-run spread; a gap larger than the spread is marked for explanation, and the explanation is written in the text of this document |
 | `topology.md` | The table of section 9.6 for every scenario |
 | `memory_budget.md` | The table of section 8.3 |
-| `faults.md` | Fault runs: case, assertion, recovery time |
-| `ledger.md` | The table of section 12 |
+| `faults.md` | The fault runs, a robot killed in `disconnect` and the depth worker killed in `worker_kill`: case, checks, recovery time |
+| `ledger.md` | Every candidate of section 12 with its outcome, those not run included |
 | `env.md` | The test machines |
+
+Tables and plots are deterministic: the same inputs give the same bytes. An item whose runs do not exist (the FIFO control, the delay sweep, the fault runs, an empty ledger) is still written: a table with its header and one row that says "not run", or a figure that says "not run". Tables and plots use only the runs that `facts.json` and the ledger name (section 11.4). A plot of one run's series shows the counted run of the `single` topology with the lowest repeat index.
 
 ## 12. Tried and rejected
 
-Each optimization or control is a candidate with a stated hypothesis, one main metric and guard metrics, all written down before it runs. Runs go A, B, B, A, each in a fresh container, to cancel drift. A candidate is accepted only if its main metric improves by more than the baseline's run-to-run spread and no guard metric gets meaningfully worse. Every attempt is logged in `results/ledger.jsonl` with its configs, runs, the baseline spread, the change in each metric and an outcome: accepted, rejected for no gain, rejected for a guard regression, or inconclusive. This table is generated from that file.
+Each optimization or control is a candidate with a stated hypothesis, one main metric and guard metrics, each with the direction that counts as better, all written down in `bench/candidates.py` before it runs. A candidate runs one scenario on the real models in arm A, the defaults (for the depth caps, the default cap forced, so that both arms run the patched graph), and arm B, one change. The arms run in the order A, B, B, A, each run in fresh containers, to cancel drift. Comparison runs live under `results/raw/compare/` and never feed a demo fact.
 
-| Candidate | Hypothesis | Main metric | Guard metrics | Outcome |
-|---|---|---|---|---|
-| FIFO against latest-wins (control) | Under FIFO, freshness grows for the whole run; under latest-wins it is flat. | Freshness trend in `steady` | Throughput | planned |
-| ONNX Runtime default threads against explicit (control) | Default thread counts oversubscribe the quota and add throttling. | Throttled time; p99 freshness at 5 robots | Throughput | planned |
-| Depth pacing on and off | Pacing removes container-wide freezes at 10 and 50 robots. | Classifier p99 freshness; fire lag p99 | Depth throughput | planned |
-| Batch caps: classifier 1, 2, 4, 8; depth 1, 2, 4 | Larger caps add latency without throughput on one thread. | p95 freshness at 10 and 50 robots | Per-robot throughput | planned |
-| 2-thread depth at 1, 3 and 5 robots | A second thread shortens depth's service time while CPU is idle. | p95 peak command age for depth | Classifier p99 freshness; throttled time | planned |
-| Take the pending frame now against waiting for the next | Waiting lowers peak command age with one robot, at a small cost in commands. | Mean peak command age at 1 robot | Depth commands per second | planned |
-| Half-size JPEG decode | Decoding at half size lowers the classifier's CPU per frame and moves its inflection point. | Classifier capacity | Top-1 agreement with full-size decode | planned |
-| Server-advised frame rate at 50 robots | Dropping frames at the source lowers gateway CPU and bytes on the wire. | Gateway CPU; bytes per second | Freshness; fairness | planned |
-| Quota against cpuset limit (control) | Under cpuset the same contention shows as time slicing, not freezes. | Throttled time; p99 freshness | Throughput | planned |
-| Per-robot classifier rate cap | Capping the classifier frees CPU that a 2-thread depth worker can use. | p95 peak command age for depth | Classifier coverage | planned |
-| INT8 MiDaS | Quantization lowers depth's service time. | Depth service time | Agreement of depth commands with the float model | planned |
+The outcome compares the median of the B runs with the median of the A runs, metric by metric. Each metric has a threshold, the largest of four values: the spread of its A runs and the spread of its B runs (each highest minus lowest); 4% of the absolute value of its A median; and its absolute floor. The 4% is a design choice whose size the run-to-run variation of the container spike informed. The absolute floor is one frame period divided by the `steady` duration for the freshness trend (the scale of the `steady` check that freshness has no upward trend), 1 ms per s for throttled time (one hundredth of a quota period in each second, below any effect section 6.4 discusses), and zero for every other metric. The outcome is the first of these that holds: `rejected_guard`, when a guard's median moves in its worse direction by more than its threshold; `accepted`, when the main median moves in its better direction by more than its threshold; `rejected_regression`, when the main median moves in its worse direction by more than its threshold; `inconclusive`, when it moves in its better direction by more than half its threshold; otherwise `rejected_no_gain`.
+
+Every candidate is logged in `results/ledger.jsonl` with its fields, the run ids of each arm, each metric's median per arm, the change, the spread of each arm and the outcome; a candidate with no runs has the outcome "not run". `ledger.md` is generated from that file, and the Outcome column below is filled from it.
+
+| Candidate | Scenario | Change in B | Hypothesis | Main metric | Guard metrics | Outcome |
+|---|---|---|---|---|---|---|
+| `fifo_vs_latest` (control) | `steady`, `single` | FIFO queue, skip rule off | Under FIFO, freshness grows for the whole run; under latest-wins it is flat. | Depth freshness trend, lower | Depth commands per second, higher | `{{ledger.fifo_vs_latest.outcome}}` |
+| `cls_cap_1` | `massive`, `single` | Classifier batch cap 1 | A cap of 1 lowers the classifier's freshness tail at 50 robots without lowering its throughput (H3). | Classifier freshness p95, lower | Classifier commands per second per robot (mean), higher | `{{ledger.cls_cap_1.outcome}}` |
+| `depth_cap_2` | `massive`, `single` | Depth batch cap 2 | A larger depth cap spreads the dispatch cost, and lowers depth's freshness tail at 50 robots only if that cost is large (H3). | Depth freshness p95, lower | Depth commands per second per robot (mean), higher | `{{ledger.depth_cap_2.outcome}}` |
+| `depth_cap_4` | `massive`, `single` | Depth batch cap 4 | As `depth_cap_2`, with a larger cap. | Depth freshness p95, lower | Depth commands per second per robot (mean), higher | `{{ledger.depth_cap_4.outcome}}` |
+| `ort_default_threads` (control) | `sweep_n5`, `single` | Both thread counts left to ONNX Runtime | Default thread counts oversubscribe the quota and add throttling. | Throttled time, lower | Classifier freshness p99, lower; classifier commands per second per robot (mean), higher | `{{ledger.ort_default_threads.outcome}}` |
+| `depth_unpaced` (control) | `massive`, `single` | Depth not paced | Without pacing, two saturated inference threads plus the frame I/O exceed the quota at 50 robots, and the kernel freezes the whole container for part of each period (H5). | Throttled time, lower | Classifier freshness p99, lower; simulator fire lag p99, lower; depth commands per second per robot (mean), higher | `{{ledger.depth_unpaced.outcome}}` |
+
+Planned experiments, defined and not run in this evidence:
+
+- **2-thread depth at 1, 3 and 5 robots.** A second thread shortens depth's service time while CPU is idle. Main metric: p95 peak command age for depth. Guards: classifier p99 freshness; throttled time.
+- **Take the pending frame now against waiting for the next.** Waiting lowers peak command age with one robot, at a small cost in commands. Main metric: mean peak command age at 1 robot. Guard: depth commands per second.
+- **Half-size JPEG decode.** Decoding at half size lowers the classifier's CPU per frame and moves its inflection point. Main metric: classifier capacity. Guard: top-1 agreement with full-size decode.
+- **Server-advised frame rate at 50 robots.** Dropping frames at the source lowers gateway CPU and bytes on the wire. Main metrics: gateway CPU; bytes per second. Guards: freshness; fairness.
+- **Quota against cpuset limit (control).** Under cpuset the same contention shows as time slicing, not freezes. Main metrics: throttled time; p99 freshness. Guard: throughput.
+- **Per-robot classifier rate cap.** Capping the classifier frees CPU that a 2-thread depth worker can use. Main metric: p95 peak command age for depth. Guard: classifier coverage.
+- **INT8 MiDaS.** Quantization lowers depth's service time. Main metric: depth service time. Guard: agreement of depth commands with the float model.
+- **Aligned phases.** With every robot in phase, an unsaturated classifier sees all pending frames at once, so batches grow. Main metrics: the batch-size distribution and freshness p95 across the sweep, against random phases.
 
 ## 13. Limitations and what is not measured
 
@@ -1031,6 +1087,7 @@ Each optimization or control is a candidate with a stated hypothesis, one main m
 - **Timer resolution.** The event loop's timers have a resolution of 1 ms. A pacing release, a robot's tick and the loop-lag probe can be late by up to a millisecond, and the ping round trip is known to the millisecond, so on one host it is usually reported as null.
 - **Connections before HTTP.** A connection that never sends its HTTP request is bounded in time by the handshake timeout but not in number (section 4.3: in production a load balancer sits in front of the gateway and bounds them).
 - **Slow-consumer detection.** A robot that stops reading is found only after the kernel buffers of both ends have filled with commands, so the time to find it depends on those buffer sizes and on the command rate.
+- **Declared frame rates.** The pacing share reserves the frame I/O of the frame rates that robots declare in the handshake, which refuses a rate above 60 frames per second. A robot that sends faster than it declares gets no more of either model, but its frames cost the gateway CPU that the reserve does not hold, up to the ingress limit of its connection.
 - **Fake models.** The fake and null models use almost no CPU, so the feed-forward pacing share does not engage in runs with them.
 - **Skip rule.** On the test machine depth's margin is positive, so the skip rule's condition is not met at 30 fps and the runs do not exercise it; `frames_skipped` in each run's `/metrics` shows whether it fired. It is covered by unit and property tests only.
 - **Server-side percentiles** come from log-bucket histograms with about 9% resolution. Exact percentiles come from robot-side samples.
@@ -1057,13 +1114,18 @@ The interface below is planned. The README will carry the final commands.
 ```
 docker compose build                                       # downloads both models and verifies their sha256
 docker compose up                                          # gateway and workers, limited to 2 CPUs and 4 GB; /metrics on port 8080
-docker compose exec system python -m bench.run steady      # robots in the same container, against the running service
+# one scenario by hand, against the running service; prints each robot's freshness; ungated and never counted
+docker compose exec system python -m bench.run --run-dir /tmp/steady --scenario steady
 docker compose exec system python -m robot.fleet --robots 3 --duration-s 30    # robots by hand, without the runner
 docker compose run --rm system pytest -q                   # the tests, inside the image
-make evidence                                              # every scenario, repeated, one fresh container per run; skips finished runs
-make report                                                # aggregate, plot, render this document, check its numbers
+make evidence                                              # on the host: every scenario, repeated, gated, fresh containers per run; skips finished runs
+make compare                                               # on the host: the comparisons of section 12, each A, B, B, A in fresh containers
+make report                                                # summaries where needed, aggregate, tables, plots, render this document, check its numbers, list failed checks
+make numbers                                               # the number check alone, against the current code
+make report DIGEST=recorded                                # render again from the runs facts.json recorded, when the code has changed since they ran
+RRI_RESULTS=/absolute/path make evidence                   # a results root elsewhere; the make targets and the compose files follow it
 docker compose -f docker-compose.split.yml up              # the split topology: the service alone
 docker compose -f docker-compose.split.yml run --rm robots python -m robot.fleet --url ws://system:8080/ws --robots 3 --duration-s 30
 ```
 
-How a number reaches this document: a gated run writes `results/raw/<scenario>/<run>/summary.json`; aggregation writes `results/summary/facts.json`; rendering fills the placeholders; a check fails if a number here is neither a rendered fact nor a declared design constant.
+How a number reaches this document: a gated run writes `results/raw/<scenario_key>/<run_id>/summary.json`; aggregation writes `results/summary/facts.json` from the counted runs; rendering fills the placeholders of the template; the number check fails if a number here is neither a rendered fact nor a declared design constant, or if this document, the facts, the tables or the ledger are out of date. `make report` and `make numbers` check against the code digest of the working tree, so they say whether the evidence matches the current code; `make check` checks against the runs that `facts.json` recorded, so a code change alone does not fail it (section 11.4).

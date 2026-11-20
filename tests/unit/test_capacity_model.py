@@ -31,7 +31,9 @@ from common.commands import MODEL_KEYS
 
 NS_PER_S = 1_000_000_000
 NS_PER_MS = 1_000_000
-CONFIG = ServerConfig()
+# The configured cost of the frame I/O is given, not left to the default, because the pacing
+# shares worked out below rest on it.
+CONFIG = replace(ServerConfig(), io_cpu_ms_per_frame=0.15)
 MODELS = CONFIG.models
 # The period every simulated robot declares, in whole nanoseconds.
 FRAME_PERIOD_MS = round(NS_PER_S / CONFIG.frame_rate_hz) / NS_PER_MS
@@ -819,7 +821,7 @@ def test_main_writes_predictions_that_json_reads_back(written: dict[str, Any]) -
 def test_main_records_the_files_io_cost_beside_the_configured_one(written: dict[str, Any]) -> None:
     inputs = written["inputs"]
 
-    assert (inputs["io_cpu_ms_per_frame"], inputs["configured_io_cpu_ms_per_frame"]) == (0.2, 0.15)
+    assert (inputs["io_cpu_ms_per_frame"], inputs["configured_io_cpu_ms_per_frame"]) == (0.2, 0.26)
 
 
 def test_main_computes_the_pacing_share_from_the_configured_io_cost(
@@ -828,8 +830,8 @@ def test_main_computes_the_pacing_share_from_the_configured_io_cost(
     # At 10 robots the classifier fills its thread, and depth serves every frame alone, at 58 ms
     # of CPU time: 17.4 cores offered. Depth's share is what the quota leaves after the 0.1 core
     # of headroom, the classifier's thread and the frame I/O of 10 robots at the configured
-    # 0.15 ms per frame. The file's 0.2 ms would leave 0.84 cores.
-    assert written["curves"]["depth"]["utilization"][9] == pytest.approx(17.4 / 0.855)
+    # 0.26 ms per frame. The file's 0.2 ms would leave 0.84 cores.
+    assert written["curves"]["depth"]["utilization"][9] == pytest.approx(17.4 / 0.822)
 
 
 def test_main_seeds_the_robots_phases_with_0_by_default(tmp_path: Path) -> None:

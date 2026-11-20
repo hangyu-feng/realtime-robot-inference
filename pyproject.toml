@@ -60,3 +60,6 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error"]
+markers = [
+    "docker: needs the host's docker CLI; make test leaves it out and make test-docker runs it",
+]

@@ -7,10 +7,14 @@ a predicate on the snapshot's monotonic time. No test sleeps.
 
 Fleets and the gateway write their output to files, never to a pipe that nobody reads, except
 the gateway's stdout, which a thread reads to the end.
+
+open_raw_session and raw_frame play a robot message by message, for the peers that a robot
+process never is: one that breaks a rule, floods, or comes and goes a thousand times.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -32,7 +36,19 @@ import numpy.typing as npt
 from bench.live_check import fetch_metrics
 from cloud.config import OVERRIDES_VARIABLE, TOPOLOGY_VARIABLE
 from common.commands import MODEL_KEYS
+from common.protocol import (
+    FRAME_HEIGHT_PX,
+    FRAME_WIDTH_PX,
+    PROTOCOL_VERSION,
+    FrameHeader,
+    Hello,
+    decode_welcome,
+    encode_frame,
+    encode_hello,
+)
+from common.transport_ws import ClientOptions, WsConnection, connect_ws
 from robot.samples import load_samples
+from robot.settings import RobotSettings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NS_PER_S = 1_000_000_000
@@ -60,6 +76,21 @@ FLEET_LEAD_NS = 2 * NS_PER_S
 # and its samples file.
 FLEET_EXIT_MARGIN_S = 30.0
 POLL_INTERVAL_S = 0.1
+# cls is far from saturation and serves every frame; the rest of a robot's frames allows for
+# those in flight or skipped at the end of its run.
+SERVED_SHARE = 0.9
+# A raw client is a default robot on the wire: its hello, its socket settings and its limits.
+ROBOT_SETTINGS = RobotSettings()
+ROBOT_CLIENT_OPTIONS = ClientOptions(
+    max_message_bytes=ROBOT_SETTINGS.max_message_bytes,
+    rcvbuf_bytes=ROBOT_SETTINGS.rcvbuf_bytes,
+    sndbuf_bytes=ROBOT_SETTINGS.sndbuf_bytes,
+    notsent_lowat_bytes=ROBOT_SETTINGS.notsent_lowat_bytes,
+    open_timeout_s=ROBOT_SETTINGS.connect_timeout_ms / 1000,
+    close_timeout_s=ROBOT_SETTINGS.close_timeout_ms / 1000,
+)
+# The JPEG of a raw frame: it passes the gateway's start-marker check and the fake runtime's.
+RAW_JPEG = b"\xff\xd8\xff" + bytes(1000)
 _LISTENING_PREFIX = "listening on "
 _READY_PREFIX = "ready:"
 
@@ -292,6 +323,18 @@ def rate_per_s(commands: Commands, model: str, start_ns: int, end_ns: int) -> fl
     return int(count) / ((end_ns - start_ns) / NS_PER_S)
 
 
+def silent_seconds(
+    commands: Commands, model: str, t0_ns: int, start_s: int, end_s: int
+) -> list[int]:
+    """Return each whole second from start_s to end_s after t0 with no command of the model."""
+    return [
+        second
+        for second in range(start_s, end_s)
+        if rate_per_s(commands, model, t0_ns + second * NS_PER_S, t0_ns + (second + 1) * NS_PER_S)
+        == 0
+    ]
+
+
 def first_receive_ns(commands: Commands, model: str) -> int:
     """Return when the robot received its first command of a model."""
     return int(commands["receive_ns"][commands["model"] == MODEL_KEYS.index(model)].min())
@@ -324,6 +367,14 @@ def wait_for_metrics(
         time.sleep(POLL_INTERVAL_S)
 
 
+def gains(before: Snapshot, after: Snapshot, group: str) -> dict[str, int]:
+    """Return how much each reason of connections.<group> rose from before to after."""
+    return {
+        reason: count - before["connections"][group][reason]
+        for reason, count in after["connections"][group].items()
+    }
+
+
 def at_or_after(instant_ns: int) -> Callable[[Snapshot], bool]:
     """Return a predicate that holds once the gateway's clock has reached instant_ns."""
     return lambda snapshot: snapshot["ts_mono_ns"] >= instant_ns
@@ -342,3 +393,39 @@ def wait_for_exit(pid: int, timeout_s: float) -> bool:
         return bool(poller.poll(round(timeout_s * 1000)))
     finally:
         os.close(descriptor)
+
+
+async def open_raw_session(ws_url: str, robot_id: str) -> tuple[WsConnection, int]:
+    """Dial the gateway as a default robot, say its hello, and return the session it is given.
+
+    The caller drives the connection message by message, which a robot process cannot do.
+    """
+    connection = await connect_ws(ws_url, ROBOT_CLIENT_OPTIONS)
+    with contextlib.ExitStack() as stack:
+        stack.callback(connection.abort)
+        hello = Hello(
+            PROTOCOL_VERSION,
+            robot_id,
+            ROBOT_SETTINGS.token,
+            ROBOT_SETTINGS.models,
+            ROBOT_SETTINGS.stale_ms,
+            ROBOT_SETTINGS.watchdog_ms,
+            ROBOT_SETTINGS.frame_rate_hz,
+            FRAME_WIDTH_PX,
+            FRAME_HEIGHT_PX,
+        )
+        connection.send_nowait(encode_hello(hello))
+        async with asyncio.timeout(ROBOT_SETTINGS.welcome_timeout_ms / 1000):
+            welcome = await connection.recv()
+        assert isinstance(welcome, str), welcome
+        session = decode_welcome(welcome).session
+        # The caller owns the connection from here on.
+        stack.pop_all()
+    return connection, session
+
+
+def raw_frame(session: int, frame_number: int) -> bytes:
+    """Return a frame of the session captured and sent now."""
+    # ASSUMPTION: A20. The gateway reads the same monotonic clock, so these times are its own.
+    now_ns = time.monotonic_ns()
+    return encode_frame(FrameHeader(session, frame_number, now_ns, now_ns), RAW_JPEG)

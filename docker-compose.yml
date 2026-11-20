@@ -7,6 +7,9 @@ services:
       context: .
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      # A provenance attestation records the build's time, so every build of an unchanged
+      # tree would be a new image, and the tests gate stored by image would never be found.
+      provenance: false
     image: realtime-robot-inference:dev
     init: true
     cpus: 2.0
@@ -19,7 +22,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./results:/app/results
+      - ${RRI_RESULTS:-./results}:/app/results
     # The gateway shuts down within shutdown_grace_ms + 2 * worker_stop_timeout_ms
     # + close_timeout_ms, which is 7 s with the default settings.
     stop_grace_period: 10s

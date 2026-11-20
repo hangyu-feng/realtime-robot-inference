@@ -1,0 +1,10 @@
+..F                                                                      [100%]
+=================================== FAILURES ===================================
+_______________________________ test_subtraction _______________________________
+
+    def test_subtraction() -> None:
+>       assert 2 - 1 == 0
+E       assert (2 - 1) == 0
+
+test_failed.py:18: AssertionError
+1 failed, 2 passed, 1 deselected in 0.10s

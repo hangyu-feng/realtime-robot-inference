@@ -8,6 +8,9 @@ services:
       context: .
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      # A provenance attestation records the build's time, so every build of an unchanged
+      # tree would be a new image, and the tests gate stored by image would never be found.
+      provenance: false
     image: realtime-robot-inference:dev
     init: true
     cpus: 2.0
@@ -20,7 +23,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./results:/app/results
+      - ${RRI_RESULTS:-./results}:/app/results
     # The gateway shuts down within shutdown_grace_ms + 2 * worker_stop_timeout_ms
     # + close_timeout_ms, which is 7 s with the default settings.
     stop_grace_period: 10s
@@ -41,6 +44,7 @@ services:
       context: .
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      provenance: false
     image: realtime-robot-inference:dev
     init: true
     # No CPU limit: this topology shows the cloud with the whole quota to itself,
@@ -48,7 +52,7 @@ services:
     mem_limit: 2g
     memswap_limit: 2g # equal to mem_limit, so no swap
     volumes:
-      - ./results:/app/results
+      - ${RRI_RESULTS:-./results}:/app/results
     depends_on: [system]
     profiles: ["robots"]
     # The image's own command starts a gateway, so a bare `run --rm robots`

@@ -1,0 +1,11 @@
+..E                                                                      [100%]
+==================================== ERRORS ====================================
+_________________ ERROR at setup of test_uses_a_broken_fixture _________________
+
+    @pytest.fixture
+    def broken() -> None:
+>       raise RuntimeError("the fixture broke")
+E       RuntimeError: the fixture broke
+
+test_error.py:19: RuntimeError
+2 passed, 1 deselected, 1 error in 0.09s

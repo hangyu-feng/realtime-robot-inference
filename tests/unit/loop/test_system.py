@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
+from bench.capacity_model import command_gap_bound_ns
 from common.commands import MODEL_KEYS
 from common.protocol import STAGE_NAMES
 from robot.samples import load_samples
@@ -89,12 +91,22 @@ async def test_one_robot_gets_commands_whose_stages_add_up_and_sit_where_they_be
     assert (stage_us[:, STAGE_NAMES.index("batch_peers")] == 0).all()
 
 
-async def test_five_robots_on_a_saturated_depth_get_depth_commands_in_turn() -> None:
+@pytest.mark.parametrize(
+    "offset_ns",
+    [
+        # Started 6 ms apart, so their frames arrive at different instants.
+        pytest.param(6 * MS, id="staggered"),
+        # Started together, so every robot's frame arrives at one instant.
+        pytest.param(0, id="aligned"),
+    ],
+)
+async def test_five_robots_on_a_saturated_depth_get_depth_commands_in_turn(
+    offset_ns: int,
+) -> None:
     robot_ids = [f"r{index:02}" for index in range(1, 6)]
     async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
         for index, robot_id in enumerate(robot_ids):
-            # Started 6 ms apart, so their frames arrive at different instants.
-            system.add_robot(robot_id, index * 6 * MS, 12 * SECOND)
+            system.add_robot(robot_id, index * offset_ns, 12 * SECOND)
         spreads = []
         for _ in range(10):
             await system.advance(1)
@@ -230,3 +242,199 @@ async def test_every_identity_holds_at_every_second_while_robots_join_and_leave(
     assert violations == []
     assert seen == {robot_id for robot_id, _, _ in plan}
     assert closed["client_close"] == len(plan)
+
+
+def model_counters(snapshot: Mapping[str, Any], robot_id: str, model: str) -> Any:
+    return snapshot["robots"][robot_id]["models"][model]
+
+
+async def test_robots_that_all_leave_at_one_instant_leave_the_gateway_idle() -> None:
+    robot_ids = [f"r{index}" for index in range(1, 6)]
+    async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
+        for index, robot_id in enumerate(robot_ids):
+            system.add_robot(robot_id, index * 6 * MS, 60 * SECOND)
+        await advance_to(system, 2 * SECOND + BETWEEN_EVENTS_NS)
+        for robot_id in robot_ids:
+            system.leave(robot_id)
+        await advance_to(system, 3 * SECOND + BETWEEN_EVENTS_NS)
+        idle = await system.metrics()
+        await advance_to(system, 4 * SECOND + BETWEEN_EVENTS_NS)
+        later = await system.metrics()
+    held = [
+        model_counters(idle, robot_id, model)[name]
+        for robot_id in robot_ids
+        for model in MODEL_KEYS
+        for name in ("in_flight", "commands_queued")
+    ]
+    workers = [
+        (idle["workers"][model]["state"], idle["workers"][model]["restarts"])
+        for model in MODEL_KEYS
+    ]
+    assert idle["connections"]["current"] == 0
+    assert idle["connections"]["closed"]["client_close"] == len(robot_ids)
+    assert idle["connections"]["closed"]["internal_error"] == 0
+    assert [idle["models"][model]["eligible"] for model in MODEL_KEYS] == [0] * len(MODEL_KEYS)
+    assert held == [0] * len(held)
+    assert identity_violations(idle) == []
+    assert workers == [("ready", 0)] * len(MODEL_KEYS)
+    # With no robot connected, nothing samples the loop's lag and nothing is dispatched.
+    assert later["loop"]["lag_ms"]["count"] == idle["loop"]["lag_ms"]["count"]
+    assert [later["models"][model]["batches"] for model in MODEL_KEYS] == [
+        idle["models"][model]["batches"] for model in MODEL_KEYS
+    ]
+
+
+async def test_fifty_robots_at_one_instant_are_all_accepted_and_served_within_the_bound() -> None:
+    robot_ids = [f"r{index:02}" for index in range(1, 51)]
+    async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
+        for robot_id in robot_ids:
+            system.add_robot(robot_id, 0, 10 * SECOND)
+        await advance_to(system, 3 * SECOND + BETWEEN_EVENTS_NS)
+        snapshot = await system.metrics()
+    # Robots started at one instant connect at one instant, and a cycle is at most the cap
+    # times the fake service time: the fake links answer exactly one service time per frame
+    # after the dispatch and resume the dispatcher at once.
+    bounds_ms = {}
+    for model in MODEL_KEYS:
+        cap = snapshot["workers"][model]["batch_cap"]
+        cycle_ns = cap * SATURATED_MS[model] * MS
+        bounds_ms[model] = (
+            command_gap_bound_ns(len(robot_ids), cap, PERIOD_NS, cycle_ns, None) / 1e6
+        )
+    connections = snapshot["connections"]
+    unserved = [
+        f"{robot_id}.{model}"
+        for robot_id in robot_ids
+        for model in MODEL_KEYS
+        if model_counters(snapshot, robot_id, model)["commands_sent"] < 1
+    ]
+    over_bound = {
+        f"{robot_id}.{model}": model_counters(snapshot, robot_id, model)["max_service_gap_ms"]
+        for robot_id in robot_ids
+        for model in MODEL_KEYS
+        if model_counters(snapshot, robot_id, model)["max_service_gap_ms"] > bounds_ms[model]
+    }
+    assert connections["accepted"] == len(robot_ids)
+    assert connections["current"] == len(robot_ids)
+    assert set(connections["rejected"].values()) == {0}
+    assert connections["closed"]["internal_error"] == 0
+    assert unserved == []
+    assert over_bound == {}
+    assert identity_violations(snapshot) == []
+
+
+async def test_a_robot_that_reconnects_at_once_with_restarted_frame_numbers_is_served(
+    tmp_path: Path,
+) -> None:
+    async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
+        system.add_robot("r1", 0, 6 * SECOND)
+        system.add_robot("r2", 11 * MS, 6 * SECOND)
+        system.add_robot("r3", 22 * MS, 6 * SECOND)
+        await advance_to(system, 2 * SECOND + BETWEEN_EVENTS_NS)
+        before = await system.metrics()
+        system.abort("r3")
+        # A new process with the same id, whose capture schedule and frame numbers start
+        # again from 0, connects at the instant the old one dies.
+        system.add_robot("r3", system.clock.now_ns(), 6 * SECOND)
+        await advance_to(system, 4 * SECOND + BETWEEN_EVENTS_NS)
+        after = await system.metrics()
+        path = tmp_path / "r3.npz"
+        system.samples("r3").save(path, {})
+    commands, _, _ = load_samples(path)
+    session = after["robots"]["r3"]["session"]
+    closed_before = before["connections"]["closed"]
+    closed_after = after["connections"]["closed"]
+    # The gateway may see the new hello before the old connection's end, as on a real host,
+    # so the old session ends either abnormal or replaced, and exactly one of them.
+    ended = sum(closed_after[reason] - closed_before[reason] for reason in ("abnormal", "replaced"))
+    assert after["robots"]["r3"]["connected"] is True
+    assert session > before["robots"]["r3"]["session"]
+    assert after["robots"]["r3"]["frames_rejected"] == before["robots"]["r3"]["frames_rejected"]
+    assert set(commands["model"].tolist()) == set(range(len(MODEL_KEYS)))
+    assert set(commands["session"].tolist()) == {session}
+    assert ended == 1
+    assert closed_after["internal_error"] == 0
+    assert after["connections"]["current"] == 3
+    assert identity_violations(after) == []
+
+
+async def test_a_robot_sending_five_frames_per_second_is_served_every_frame() -> None:
+    async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
+        system.add_robot("r1", 0, 10 * SECOND)
+        system.add_robot("r2", 11 * MS, 10 * SECOND)
+        # Depth serves the two fast robots at its cap of two 40 ms frames, so a frame of the
+        # slow robot waits at most one batch, far within its 200 ms period.
+        system.add_robot("slow", 22 * MS, 10 * SECOND, frame_rate_hz=5.0)
+        await advance_to(system, 6 * SECOND + BETWEEN_EVENTS_NS)
+        snapshot = await system.metrics()
+    slow_lost = [
+        model_counters(snapshot, "slow", model)[name]
+        for model in MODEL_KEYS
+        for name in ("frames_overwritten", "frames_skipped")
+    ]
+    slow_depth = model_counters(snapshot, "slow", "depth")
+    fast_sent = [
+        model_counters(snapshot, robot_id, "depth")["commands_sent"] for robot_id in ("r1", "r2")
+    ]
+    fast_overwritten = [
+        model_counters(snapshot, robot_id, "depth")["frames_overwritten"]
+        for robot_id in ("r1", "r2")
+    ]
+    assert slow_lost == [0] * len(slow_lost)
+    assert slow_depth["commands_sent"] >= slow_depth["frames_received"] - 1
+    assert max(fast_sent) - min(fast_sent) <= 1
+    assert min(fast_overwritten) > 0
+    assert identity_violations(snapshot) == []
+
+
+async def test_a_depth_worker_killed_mid_batch_restarts_while_cls_serves_every_frame() -> None:
+    robot_ids = ["r1", "r2"]
+    async with InProcessSystem(SATURATED_MS, SKIP_RULE_OFF) as system:
+        system.add_robot("r1", 0, 10 * SECOND)
+        system.add_robot("r2", 11 * MS, 10 * SECOND)
+        await advance_to(system, 2 * SECOND + BETWEEN_EVENTS_NS)
+        held = await system.metrics()
+        system.crash_worker("depth")
+        await advance_to(system, 2 * SECOND + BETWEEN_EVENTS_NS + MS)
+        crashed = await system.metrics()
+        await advance_to(system, 3 * SECOND + BETWEEN_EVENTS_NS)
+        back = await system.metrics()
+        await advance_to(system, 4 * SECOND + BETWEEN_EVENTS_NS)
+        later = await system.metrics()
+
+    def total(snapshot: Mapping[str, Any], model: str, name: str) -> int:
+        return sum(model_counters(snapshot, robot_id, model)[name] for robot_id in robot_ids)
+
+    def gain(model: str, name: str, early: Mapping[str, Any]) -> list[int]:
+        return [
+            model_counters(later, robot_id, model)[name]
+            - model_counters(early, robot_id, model)[name]
+            for robot_id in robot_ids
+        ]
+
+    in_flight = total(held, "depth", "in_flight")
+    cls_kept = [
+        model_counters(snapshot, robot_id, "cls")[name]
+        for robot_id in robot_ids
+        for name in ("frames_failed", "frames_overwritten")
+        for snapshot in (held, later)
+    ]
+    cls_sent = gain("cls", "commands_sent", held)
+    cls_received = gain("cls", "frames_received", held)
+    assert in_flight >= 1
+    assert total(crashed, "depth", "frames_failed") - total(held, "depth", "frames_failed") == (
+        in_flight
+    )
+    assert crashed["workers"]["depth"]["state"] == "restarting"
+    assert crashed["workers"]["cls"]["state"] == "ready"
+    assert later["workers"]["depth"]["state"] == "ready"
+    assert later["workers"]["depth"]["restarts"] == 1
+    assert later["workers"]["cls"]["restarts"] == 0
+    assert min(gain("depth", "commands_sent", back)) > 0
+    assert cls_kept[0::2] == cls_kept[1::2]
+    assert all(
+        sent >= received - 1 for sent, received in zip(cls_sent, cls_received, strict=True)
+    ), (cls_sent, cls_received)
+    assert later["connections"]["current"] == len(robot_ids)
+    assert later["connections"]["closed"]["internal_error"] == 0
+    assert identity_violations(later) == []
