@@ -1,0 +1,143 @@
+{
+  "kind": "model_bench.stages",
+  "args": {
+    "command": "stages",
+    "iterations": 300,
+    "warmup_iterations": 5,
+    "out": "/app/results/raw/model_bench/single-dfc16b1cc32a-09dba712-r2/reports/stages.json"
+  },
+  "environment": {
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+    "cpu_count_visible": 32,
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "cgroup": {
+      "version": 2,
+      "cpu_limit_cores": 2.0,
+      "cpu_period_us": 100000,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0,
+      "cpuset": "0-31"
+    },
+    "python": "3.14.10",
+    "packages": {
+      "onnxruntime": "1.32.0",
+      "numpy": "2.5.5",
+      "opencv-python-headless": "5.1.0.95",
+      "websockets": "17.4",
+      "uvloop": "0.23.0",
+      "onnx": "1.23.2"
+    },
+    "model_sha256": {
+      "midas_small.onnx": "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58",
+      "midas_small_batched.onnx": "c2879a09b49dc4fa87211df74d982ae3b3c78aa11d8f2cdcc0498b9c890b86c0",
+      "mobilenetv3_small.onnx": "d36eea8c3298d339c232581dff18beed6651eacd607d0a531b7bdb100f8dc713"
+    },
+    "start_utc": "2026-11-21T08:39:02+00:00"
+  },
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "min_bytes": 40459,
+    "mean_bytes": 40678.78125,
+    "max_bytes": 40981
+  },
+  "results": {
+    "decode_full": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.7658425166666666,
+        "min": 0.643275,
+        "p50": 0.723994,
+        "p95": 1.0050092,
+        "p99": 1.1842916999999997,
+        "max": 1.427564
+      },
+      "mean_cpu_ms": 0.7676834
+    },
+    "preprocess_cls_full": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.2748975966666667,
+        "min": 0.217824,
+        "p50": 0.25430050000000004,
+        "p95": 0.38762220000000014,
+        "p99": 0.5287301999999995,
+        "max": 0.636414
+      },
+      "mean_cpu_ms": 0.2762341433333333
+    },
+    "preprocess_depth_full": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.3418194033333333,
+        "min": 0.275413,
+        "p50": 0.309612,
+        "p95": 0.49190090000000003,
+        "p99": 0.7350487599999994,
+        "max": 0.874867
+      },
+      "mean_cpu_ms": 0.3429888366666667
+    },
+    "decode_half": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.5391623366666666,
+        "min": 0.446958,
+        "p50": 0.5050585000000001,
+        "p95": 0.7062697000000001,
+        "p99": 0.8140158999999991,
+        "max": 0.986294
+      },
+      "mean_cpu_ms": 0.5402686166666667
+    },
+    "preprocess_cls_half": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.2103153,
+        "min": 0.165991,
+        "p50": 0.1911705,
+        "p95": 0.3184753000000001,
+        "p99": 0.3821122099999995,
+        "max": 0.819856
+      },
+      "mean_cpu_ms": 0.21122436333333333
+    },
+    "preprocess_depth_half": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.24922890666666664,
+        "min": 0.20713,
+        "p50": 0.230048,
+        "p95": 0.34861985,
+        "p99": 0.47293433999999984,
+        "max": 0.599928
+      },
+      "mean_cpu_ms": 0.25020289333333334
+    },
+    "postprocess_cls": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.028920579999999998,
+        "min": 0.01617,
+        "p50": 0.026377,
+        "p95": 0.04218085000000001,
+        "p99": 0.06677099999999998,
+        "max": 0.12756
+      },
+      "mean_cpu_ms": 0.030015283333333333
+    },
+    "postprocess_depth": {
+      "wall_ms": {
+        "count": 300,
+        "mean": 0.07825942,
+        "min": 0.048794,
+        "p50": 0.0691245,
+        "p95": 0.11933020000000005,
+        "p99": 0.2463277799999998,
+        "max": 0.418266
+      },
+      "mean_cpu_ms": 0.07895381333333334
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "kind": "model_bench.batch",
+  "args": {
+    "command": "batch",
+    "model": "depth",
+    "graph": "published",
+    "threads": 1,
+    "spinning": "off",
+    "batch_sizes": [
+      1
+    ],
+    "min_iterations": 30,
+    "min_seconds": 2.0,
+    "warmup_iterations": 5,
+    "out": "/app/results/raw/model_bench/single-dfc16b1cc32a-09dba712-r2/reports/depth_t1_published.json"
+  },
+  "environment": {
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+    "cpu_count_visible": 32,
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "cgroup": {
+      "version": 2,
+      "cpu_limit_cores": 2.0,
+      "cpu_period_us": 100000,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0,
+      "cpuset": "0-31"
+    },
+    "python": "3.14.10",
+    "packages": {
+      "onnxruntime": "1.32.0",
+      "numpy": "2.5.5",
+      "opencv-python-headless": "5.1.0.95",
+      "websockets": "17.4",
+      "uvloop": "0.23.0",
+      "onnx": "1.23.2"
+    },
+    "model_sha256": {
+      "midas_small.onnx": "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58",
+      "midas_small_batched.onnx": "c2879a09b49dc4fa87211df74d982ae3b3c78aa11d8f2cdcc0498b9c890b86c0",
+      "mobilenetv3_small.onnx": "d36eea8c3298d339c232581dff18beed6651eacd607d0a531b7bdb100f8dc713"
+    },
+    "start_utc": "2026-11-21T08:37:36+00:00"
+  },
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "min_bytes": 40459,
+    "mean_bytes": 40678.78125,
+    "max_bytes": 40981
+  },
+  "results": [
+    {
+      "batch_size": 1,
+      "iterations": 30,
+      "wall_ms": {
+        "count": 30,
+        "mean": 86.05717996666665,
+        "min": 81.357625,
+        "p50": 86.29898349999999,
+        "p95": 88.22270795,
+        "p99": 88.83717338,
+        "max": 88.932896
+      },
+      "mean_cpu_ms": 86.04669273333333,
+      "mean_decode_ms": 0.8968725666666667,
+      "mean_preprocess_ms": 0.4733967,
+      "mean_inference_ms": 84.4918495,
+      "mean_postprocess_ms": 0.17160793333333332,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    }
+  ]
+}

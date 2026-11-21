@@ -1,11 +1,3 @@
 {
-  "runs": [
-    {
-      "path": "raw/massive/single-4dd77d7a02e6-60d80142-r2.attempt1",
-      "reasons": [
-        "no DONE",
-        "failed attempt"
-      ]
-    }
-  ]
+  "runs": []
 }

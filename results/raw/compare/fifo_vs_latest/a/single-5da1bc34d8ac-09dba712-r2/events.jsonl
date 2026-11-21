@@ -1,0 +1,6 @@
+{"event":"t0","t_s":0.0,"t0_mono_ns":1084144636026}
+{"event":"server_ready","t_s":-5.483570127}
+{"event":"robot_start","t_s":0.000118278,"robot_id":"a"}
+{"event":"robot_stop","t_s":30.000128911,"robot_id":"a"}
+{"event":"scenario_end","t_s":30.00118377}
+{"event":"final_poll","t_s":30.131747011,"settled":true,"waited_s":0.002316267}

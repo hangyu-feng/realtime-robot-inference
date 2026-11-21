@@ -1,0 +1,109 @@
+{
+  "kind": "transport_bench.dispatch",
+  "args": {
+    "command": "dispatch",
+    "batch_sizes": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "round_trips": 2000,
+    "loop": "uvloop",
+    "out": "/app/results/raw/model_bench/single-dfc16b1cc32a-09dba712-r3/reports/dispatch.json"
+  },
+  "environment": {
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+    "cpu_count_visible": 32,
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "cgroup": {
+      "version": 2,
+      "cpu_limit_cores": 2.0,
+      "cpu_period_us": 100000,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0,
+      "cpuset": "0-31"
+    },
+    "python": "3.14.10",
+    "packages": {
+      "onnxruntime": "1.32.0",
+      "numpy": "2.5.5",
+      "opencv-python-headless": "5.1.0.95",
+      "websockets": "17.4",
+      "uvloop": "0.23.0",
+      "onnx": "1.23.2"
+    },
+    "model_sha256": {},
+    "start_utc": "2026-11-21T09:07:22+00:00"
+  },
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "min_bytes": 40459,
+    "mean_bytes": 40678.78125,
+    "max_bytes": 40981
+  },
+  "results": [
+    {
+      "batch_size": 1,
+      "round_trips": 2000,
+      "wall_ms": {
+        "count": 2000,
+        "mean": 0.087732114,
+        "min": 0.039853,
+        "p50": 0.0733365,
+        "p95": 0.16442094999999995,
+        "p99": 0.23945669,
+        "max": 0.522026
+      },
+      "gateway_cpu_us_per_round_trip": 60.5663965,
+      "worker_cpu_us_per_round_trip": 29.61972
+    },
+    {
+      "batch_size": 2,
+      "round_trips": 2000,
+      "wall_ms": {
+        "count": 2000,
+        "mean": 0.0865919535,
+        "min": 0.04679,
+        "p50": 0.069082,
+        "p95": 0.1590322,
+        "p99": 0.23861320999999996,
+        "max": 0.455313
+      },
+      "gateway_cpu_us_per_round_trip": 59.524750999999995,
+      "worker_cpu_us_per_round_trip": 33.164351499999995
+    },
+    {
+      "batch_size": 4,
+      "round_trips": 2000,
+      "wall_ms": {
+        "count": 2000,
+        "mean": 0.097300638,
+        "min": 0.051149,
+        "p50": 0.077702,
+        "p95": 0.19717024999999996,
+        "p99": 0.2529625199999999,
+        "max": 0.452769
+      },
+      "gateway_cpu_us_per_round_trip": 70.0672875,
+      "worker_cpu_us_per_round_trip": 40.7654675
+    },
+    {
+      "batch_size": 8,
+      "round_trips": 2000,
+      "wall_ms": {
+        "count": 2000,
+        "mean": 0.12622774,
+        "min": 0.065305,
+        "p50": 0.0938655,
+        "p95": 0.27480239999999995,
+        "p99": 0.35346209999999995,
+        "max": 0.491463
+      },
+      "gateway_cpu_us_per_round_trip": 95.1734895,
+      "worker_cpu_us_per_round_trip": 59.5838825
+    }
+  ]
+}

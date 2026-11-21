@@ -1,0 +1,50 @@
+{
+  "config_ok": null,
+  "fresh": {
+    "accepted_before_t0": null,
+    "new_containers": true,
+    "ok": true
+  },
+  "gated": true,
+  "image_built": {
+    "built": true,
+    "containers": {
+      "cls_t1_published": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "cls_t2_published": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "depth_t1_batched": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "depth_t1_published": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "depth_t2_batched": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "depth_t2_published": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "dispatch": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "stages": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+      "websocket": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31"
+    },
+    "digest": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31"
+  },
+  "limits_ok": {
+    "expected": {
+      "cpu_limit_cores": 2.0,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0
+    },
+    "ok": true,
+    "read": {
+      "cpu_limit_cores": 2.0,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0
+    }
+  },
+  "tests_passed": {
+    "code_digest": "09dba712dd55cbaa3071da8c65dd1caef7bd68fb91a2acdd3c1df360f4d27516",
+    "commit": "2cf267bb6c7c7acea0f4039a6b8093a6af04952f",
+    "deselected_count": 29,
+    "dirty": false,
+    "failed_count": 0,
+    "gate_file": "gates/8be5e1348e40-09dba712.json",
+    "image_digest": "sha256:8be5e1348e400458383d803390ab2edc853be46dfd4c92bee439b7ce7aa3ea31",
+    "output_sha256": "c409680b9254b9b5e06375999a2fbb05c8ce6c7a512150222373deb64c453c52",
+    "passed": true,
+    "passed_count": 4547,
+    "skipped_count": 0
+  }
+}

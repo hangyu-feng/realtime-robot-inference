@@ -1,0 +1,192 @@
+{
+  "extra_compose_path": null,
+  "fleet": {
+    "frame_rate_hz": 30.0,
+    "models": [
+      "cls",
+      "depth"
+    ],
+    "planned_events": [
+      {
+        "event": "robot_start",
+        "robot_id": "a",
+        "t_s": 0.0
+      },
+      {
+        "event": "robot_start",
+        "robot_id": "b",
+        "t_s": 0.0
+      },
+      {
+        "event": "robot_stop",
+        "robot_id": "a",
+        "t_s": 40.0
+      },
+      {
+        "event": "robot_stop",
+        "robot_id": "b",
+        "t_s": 40.0
+      },
+      {
+        "event": "scenario_end",
+        "t_s": 40.0
+      }
+    ],
+    "scenario": {
+      "duration_s": 40.0,
+      "fault": {
+        "at_s": 20.0,
+        "model": "depth"
+      },
+      "name": "worker_kill",
+      "robots": [
+        {
+          "robot_id": "a",
+          "start_s": 0.0,
+          "stop_s": null
+        },
+        {
+          "robot_id": "b",
+          "start_s": 0.0,
+          "stop_s": null
+        }
+      ],
+      "windows": [
+        {
+          "end_s": 40.0,
+          "name": "all",
+          "start_s": 0.0
+        },
+        {
+          "end_s": 20.0,
+          "name": "before",
+          "start_s": 0.0
+        },
+        {
+          "end_s": 40.0,
+          "name": "after",
+          "start_s": 20.0
+        }
+      ]
+    },
+    "stale_ms": {
+      "cls": 500.0,
+      "depth": 150.0
+    },
+    "watchdog_ms": {
+      "cls": 1000.0,
+      "depth": 300.0
+    }
+  },
+  "hand_run": false,
+  "run_id": "split-91c1ecb3ba79-09dba712-r2",
+  "seed": 2,
+  "spec": {
+    "arm": null,
+    "candidate": null,
+    "code_digest": "09dba712dd55cbaa3071da8c65dd1caef7bd68fb91a2acdd3c1df360f4d27516",
+    "downlink": {
+      "delay_ms": 0.0,
+      "jitter_ms": 0.0
+    },
+    "extra_compose": null,
+    "model_set": "real",
+    "phase_mode": "random",
+    "repeat": 2,
+    "scenario_key": "worker_kill",
+    "server_config": {
+      "auth_required": false,
+      "calibration_runs": 3,
+      "downlink_queue_commands": 8,
+      "fifo_capacity_frames": 900,
+      "frame_rate_hz": 30.0,
+      "ingress": {
+        "burst_s": 1.0,
+        "max_bytes_per_s": 8388608,
+        "max_frame_age_ms": 10000.0,
+        "max_message_bytes": 1048576,
+        "max_messages_per_s": 128.0
+      },
+      "listen": {
+        "host": "0.0.0.0",
+        "port": 8080
+      },
+      "loop_probe_ms": 20.0,
+      "max_connections": 64,
+      "max_robot_entries": 256,
+      "models": {
+        "cls": {
+          "batch_sizes": [
+            1,
+            2,
+            4,
+            8
+          ],
+          "fake_frame_ms": 0.0,
+          "forced_batch_cap": null,
+          "paced": false,
+          "runtime": "onnx",
+          "stale_ms": 500.0,
+          "threads": 1,
+          "watchdog_ms": 1000.0
+        },
+        "depth": {
+          "batch_sizes": [
+            1,
+            2,
+            4,
+            8
+          ],
+          "fake_frame_ms": 0.0,
+          "forced_batch_cap": null,
+          "paced": true,
+          "runtime": "onnx",
+          "stale_ms": 150.0,
+          "threads": 1,
+          "watchdog_ms": 300.0
+        }
+      },
+      "overhead_allowance_ms": 10.0,
+      "pacing": {
+        "headroom_cores": 0.1,
+        "io_cpu_ms_per_frame": 0.26,
+        "min_share_cores": 0.25
+      },
+      "ping_interval_ms": 2000.0,
+      "protocol_version": 1,
+      "queue_policy": "latest",
+      "receive_queue_frames": 4,
+      "robot_retention_s": 300.0,
+      "shared_clock": true,
+      "skip_max_unserved_ms": 1000.0,
+      "skip_rule": true,
+      "socket": {
+        "rcvbuf_bytes": 40960,
+        "sndbuf_bytes": 4096
+      },
+      "timeouts_ms": {
+        "close": 1000.0,
+        "handshake": 5000.0,
+        "idle": 3000.0,
+        "inference": 5000.0,
+        "ping": 30000.0,
+        "shutdown_grace": 2000.0,
+        "slow_consumer": 1000.0,
+        "warmup": 120000.0,
+        "worker_stop": 2000.0
+      },
+      "topology": "split",
+      "version": "",
+      "worker_nice": 0,
+      "worker_restart_ms": {
+        "max": 10000.0,
+        "min": 500.0
+      }
+    },
+    "topology": "split",
+    "uplink": {
+      "delay_ms": 0.0,
+      "jitter_ms": 0.0
+    }
+  }
+}

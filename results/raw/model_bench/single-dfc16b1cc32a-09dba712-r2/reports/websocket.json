@@ -1,0 +1,126 @@
+{
+  "kind": "transport_bench.websocket",
+  "args": {
+    "command": "websocket",
+    "robots": 50,
+    "fps": 30,
+    "duration_s": 20.0,
+    "seed": 2,
+    "loop": "uvloop",
+    "saturate": [],
+    "worker_nice": 0,
+    "socket_buffer_bytes": 40960,
+    "out": "/app/results/raw/model_bench/single-dfc16b1cc32a-09dba712-r2/reports/websocket.json"
+  },
+  "environment": {
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+    "cpu_count_visible": 32,
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "cgroup": {
+      "version": 2,
+      "cpu_limit_cores": 2.0,
+      "cpu_period_us": 100000,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0,
+      "cpuset": "0-31"
+    },
+    "python": "3.14.10",
+    "packages": {
+      "onnxruntime": "1.32.0",
+      "numpy": "2.5.5",
+      "opencv-python-headless": "5.1.0.95",
+      "websockets": "17.4",
+      "uvloop": "0.23.0",
+      "onnx": "1.23.2"
+    },
+    "model_sha256": {},
+    "start_utc": "2026-11-21T08:39:09+00:00"
+  },
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "min_bytes": 40459,
+    "mean_bytes": 40678.78125,
+    "max_bytes": 40981
+  },
+  "results": {
+    "window_s": 20.000507184,
+    "processes": {
+      "receiver": {
+        "pid": 8,
+        "cpu_user_s": 1.74,
+        "cpu_system_s": 0.9,
+        "cpu_s": 2.64,
+        "cpu_cores": 0.1319966526704856
+      },
+      "sender": {
+        "pid": 9,
+        "cpu_user_s": 2.3,
+        "cpu_system_s": 0.96,
+        "cpu_s": 3.26,
+        "cpu_cores": 0.16299586655522083
+      }
+    },
+    "cpu_us_per_message": {
+      "receiver": 88.0,
+      "sender": 108.66666666666667
+    },
+    "cgroup": {
+      "cpu_usage_us": 5883772,
+      "nr_periods": 200,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    },
+    "sender": {
+      "ticks": 30000,
+      "frames_sent": 30000,
+      "ticks_skipped": 0,
+      "replies_received": 30000,
+      "fire_lag_ms": {
+        "count": 30000,
+        "mean": 0.14440237353333335,
+        "min": -1.456463,
+        "p50": 0.14866449999999998,
+        "p95": 1.0083022,
+        "p99": 1.2675549999999995,
+        "max": 1.713022
+      },
+      "round_trip_ms": {
+        "count": 30000,
+        "mean": 0.24090259833333336,
+        "min": 0.06095,
+        "p50": 0.22581,
+        "p95": 0.40585594999999997,
+        "p99": 0.5607312699999998,
+        "max": 1.162223
+      },
+      "socket": {
+        "sndbuf_bytes": 81920,
+        "notsent_lowat_bytes": 16384
+      },
+      "stalled_path": {
+        "frames_taken": 2,
+        "receiver_queued_bytes": 61285,
+        "robot_unsent_bytes": 20480
+      }
+    },
+    "receiver": {
+      "messages": 30000,
+      "loop_lag_ms": {
+        "count": 1979,
+        "mean": 0.10503923951490653,
+        "min": -0.938443,
+        "p50": 0.087149,
+        "p95": 0.8243634999999999,
+        "p99": 0.98095678,
+        "max": 1.15193
+      },
+      "socket": {
+        "rcvbuf_bytes": 81920,
+        "sndbuf_bytes": 81920
+      }
+    },
+    "saturate": []
+  }
+}

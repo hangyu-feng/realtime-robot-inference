@@ -1,9 +1,0 @@
-{"event":"t0","t_s":0.0,"t0_mono_ns":4150078707370}
-{"event":"server_ready","t_s":-5.462675622}
-{"event":"robot_start","t_s":0.00013711,"robot_id":"a"}
-{"event":"robot_start","t_s":0.002315942,"robot_id":"b"}
-{"event":"robot_stop","t_s":40.000164292,"robot_id":"a"}
-{"event":"robot_stop","t_s":40.001909657,"robot_id":"b"}
-{"event":"scenario_end","t_s":40.002783407}
-{"event":"final_poll","t_s":40.145215418,"settled":true,"waited_s":0.003643847}
-{"event":"fault","t_s":20.024380334,"model":"depth","pid":10}

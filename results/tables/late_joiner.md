@@ -6,10 +6,10 @@ DESIGN.md 9.2, `single` topology. A measured cell shows the fact's value, with t
 
 | Robot | Window | `cls` commands/s | `cls` p95 freshness (ms) | `depth` commands/s | `depth` p95 freshness (ms) |
 | --- | --- | --- | --- | --- | --- |
-| A | before | 29.9 (29.9 to 29.9) | 7.26 (6.82 to 8.44) | 10.7 (9.10 to 11.2) | 126 (120 to 147) |
-| A | after | 30.0 (30.0 to 30.0) | 7.89 (7.52 to 8.06) | 5.40 (5.00 to 5.70) | 128 (123 to 134) |
-| B | after | 30.0 (30.0 to 30.0) | 7.44 (6.77 to 7.86) | 5.35 (4.95 to 5.70) | 127 (123 to 136) |
-| A, predicted | after | 30.0 |  | 5.55 |  |
+| A | before | 29.9 (29.9 to 29.9) | 6.40 (6.05 to 6.61) | 12.1 (11.9 to 12.9) | 115 (112 to 116) |
+| A | after | 30.0 (30.0 to 30.0) | 6.63 (5.84 to 7.62) | 6.05 (5.95 to 6.45) | 117 (112 to 118) |
+| B | after | 30.0 (30.0 to 30.0) | 6.59 (5.88 to 6.60) | 6.00 (5.95 to 6.40) | 116 (112 to 118) |
+| A, predicted | after | 30.0 |  | 6.05 |  |
 
 Counted runs: 3.
 Counted runs behind the predictions: 3.
@@ -18,7 +18,7 @@ Counted runs behind the predictions: 3.
 
 | Quantity | `cls` | `depth` |
 | --- | --- | --- |
-| B's first command after its join (ms) | 25.9 (25.6 to 34.1) | 153 (125 to 188) |
+| B's first command after its join (ms) | 25.5 (23.9 to 34.1) | 136 (125 to 151) |
 | A and B settle at equal rates, counted in 1 s bins (s) | 1 (1 to 1) | 1 (1 to 1) |
 
 Counted runs: 3.

@@ -1,0 +1,36 @@
+{
+  "cgroup": {
+    "cpu_limit_cores": null,
+    "cpu_period_us": 100000,
+    "cpuset": "0-31",
+    "memory_limit_bytes": 2147483648,
+    "memory_swap_limit_bytes": 0,
+    "version": 2
+  },
+  "cpu_count_visible": 32,
+  "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "max_bytes": 40981,
+    "mean_bytes": 40678.78125,
+    "min_bytes": 40459
+  },
+  "kernel": "6.18.58.1-microsoft-standard-WSL2",
+  "machine": "x86_64",
+  "model_sha256": {
+    "midas_small.onnx": "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58",
+    "midas_small_batched.onnx": "c2879a09b49dc4fa87211df74d982ae3b3c78aa11d8f2cdcc0498b9c890b86c0",
+    "mobilenetv3_small.onnx": "d36eea8c3298d339c232581dff18beed6651eacd607d0a531b7bdb100f8dc713"
+  },
+  "packages": {
+    "numpy": "2.5.5",
+    "onnx": "1.23.2",
+    "onnxruntime": "1.32.0",
+    "opencv-python-headless": "5.1.0.95",
+    "uvloop": "0.23.0",
+    "websockets": "17.4"
+  },
+  "python": "3.14.10",
+  "start_utc": "2026-11-21T08:32:00+00:00"
+}
