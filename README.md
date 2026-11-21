@@ -4,10 +4,20 @@ A real-time inference service for a fleet of robots. Simulated robots stream 640
 
 [DESIGN.md](DESIGN.md) holds the design and the evidence: the frame-management and scheduling decisions, the capacity model, the metrics contract, the demos and their measured results, and the limitations. This README says how to run the service, the demos, the tests and the evidence pipeline.
 
+## At a glance
+
+Freshness of each model's commands over time in the steady demo, under latest-wins and under the FIFO control the design rejected: under FIFO, depth's freshness grows for the whole run (Tried and rejected, in DESIGN.md).
+
+![Freshness against time under latest wins and under the FIFO control, per model](results/plots/fifo_vs_latest.png)
+
+Commands per second per robot in the late-joiner demo, robot A alone for ten seconds and then A and B together, with the join marked (Late joiner, under The five demos in DESIGN.md).
+
+![Per-robot commands per second against time, with the join marked](results/plots/late_joiner_throughput.png)
+
 ## Requirements
 
 - Docker with Compose (the `docker compose` command). The service, the robots and the tests run in the image.
-- For the tests on the host and the evidence pipeline: [uv](https://docs.astral.sh/uv/), make and git. uv installs the Python that `pyproject.toml` pins (Python 3.14) and the locked dependencies.
+- For the tests on the host, the evidence pipeline and the dashboard: [uv](https://docs.astral.sh/uv/), make and git. uv installs the Python that `pyproject.toml` pins (Python 3.14) and the locked dependencies. The dashboard runs on the host with uv, not in the image.
 - Linux or macOS. On Windows, run everything inside WSL.
 
 ## Quick start
@@ -99,6 +109,44 @@ docker compose -f docker-compose.split.yml run --name rri-steady robots python -
 docker cp rri-steady:/tmp/steady ./steady && docker rm rri-steady
 ```
 
+## Dashboard
+
+`bench.dashboard` shows a run second by second in a browser: each robot's commands and their freshness, the frames each model serves and loses to overwriting, the mean batch size, the CPU in use, and the state of the workers. It runs on the host, outside the container, and nothing in the service starts it. It takes its data from one of two sources:
+
+```sh
+uv run python -m bench.dashboard --replay late_joiner   # replay a counted run from results/
+uv run python -m bench.dashboard                        # live: poll the running service's /metrics
+```
+
+Then open http://localhost:8090. Ctrl-C stops it. A page left open says "dashboard server not reachable" while no dashboard runs, and picks up the next one started.
+
+Replay plays the first counted `single` run of a scenario key from `results/`, one recorded scrape a second, and needs neither Docker nor a running service. When the run is over the status reads `replay finished` and the page keeps the run on screen. The charts hold the last two minutes, so a `soak` replay shows only its end. A key with no counted run is refused with the list of keys that have one.
+
+| Replay | What it shows |
+|---|---|
+| `late_joiner` | Robot A alone, then B joining at ten seconds and the depth commands shared between them |
+| `disconnect` | Three robots, then robot C killed and marked as disconnected, and A and B going on |
+| `worker_kill` | The depth worker killed and marked as restarted, with a gap in its CPU line and a dip in depth's commands while it comes back |
+| `massive` | Fifty robots. Past eight robots every robot is drawn in one colour, and the table under the charts names them |
+
+Live polls the service of the quick start at http://localhost:8080/metrics once a second. While the service is down the status says the gateway is not reachable, and the dashboard keeps polling. A gateway restart shows as a gap in the lines.
+
+Each point is computed from two consecutive scrapes: a rate is the rise of a counter over the time between the two on the gateway's clock (`ts_mono_ns`), and a percentile is read from what a histogram recorded between them. The fields are those of the [metrics contract](docs/metrics.md):
+
+| On the page | Fields |
+|---|---|
+| Commands per second per robot, per model | `robots.<id>.models.<m>.commands_sent` |
+| Freshness p95 per robot, per model, against the stale threshold | the robot's telemetry `freshness_ms`; `config.models.<m>.stale_ms` |
+| Frames per second per model | served: `models.<m>.frames`; overwritten: `frames_overwritten`, summed over the robots |
+| Mean batch size per model | `models.<m>.frames` over `models.<m>.batches` |
+| CPU, in cores, against the limit | `cgroup.cpu_usage_us`; `cpu_user_ms` plus `cpu_system_ms` of each of `processes`; `cgroup.cpu_limit_cores` |
+| Tiles | `connections.current`, `cgroup.memory_current_bytes`, the p99 of `loop.lag_ms`, `workers.<m>.state` and `restarts` |
+| Robot table | `connected`, and per model the commands per second, the freshness p95 and the telemetry's `commands_stale` |
+
+A freshness line is a quantile read from a histogram, so read it as the conventions of [docs/metrics.md](docs/metrics.md) describe. The exact percentiles come from each robot's per-command samples and are those of DESIGN.md. A freshness line has a gap where the robot's reports between two scrapes hold no command of that model.
+
+Replay only reads files under `results/` and does not touch the service. Live adds one more `/metrics` client, polling once a second for as long as the dashboard runs. Its cost on the service was not measured, and no evidence run had the dashboard running.
+
 ## Tests
 
 ```sh
@@ -141,7 +189,7 @@ cloud/     the gateway: connections, per-robot slots, schedulers, worker supervi
 workers/   the model worker process, and each model's preprocessing, inference and command
 robot/     the robot simulator and the fleet command line
 common/    code the processes share: wire protocol, transport, clock, histograms, cgroup and /proc readers
-bench/     the evidence: scenarios, scenario driver, evidence runner, gates, model benchmark, capacity model, summaries, aggregation, tables, plots, rendering, number check
+bench/     the evidence: scenarios, scenario driver, evidence runner, gates, model benchmark, capacity model, summaries, aggregation, tables, plots, rendering, number check, and the dashboard
 tests/     unit, property, integration and model tests, and the fakes they use
 scripts/   the build-time scripts that fetch and patch the models
 docs/      the templates of DESIGN.md and README.md, and the declared constants

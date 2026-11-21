@@ -452,6 +452,8 @@ def test_the_code_paths_are_the_service_the_bench_entry_points_and_the_image_fil
         "bench/summarize.py",
         "bench/candidates.py",
         "bench/gates.py",
+        "bench/dashboard.py",
+        "bench/dashboard.html",
         "tests/unit/test_runplan.py",
         "docs/cloud/notes.md",
         "cloud.py",

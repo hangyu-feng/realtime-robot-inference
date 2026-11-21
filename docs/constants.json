@@ -296,6 +296,11 @@
       "source": "the gateway's port, 8080 (DESIGN.md 15, README; ServerConfig.port in cloud/config.py, the ports of docker-compose.yml and docker-compose.split.yml)"
     },
     {
+      "text": "8090",
+      "category": "design",
+      "source": "the dashboard's port, 8090 (README; PORT in bench/dashboard.py)"
+    },
+    {
       "text": "60 000",
       "category": "design",
       "source": "the upper end of the time histograms, 60 000 ms (DESIGN.md 10.1, RANGE_MAX_MS in common/histogram.py)"

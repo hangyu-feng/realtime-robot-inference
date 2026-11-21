@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gateway dashboard</title>
+<!-- No icon request: the page asks its server for / and /data only. -->
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255, 255, 255, 0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+  min-height: 560px;
+  padding: 10px 16px 8px;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+#source { color: var(--ink-2); }
+#status { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.dot.good { background: var(--good); }
+.dot.warning { background: var(--warning); }
+.dot.critical { background: var(--critical); }
+.tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 8px;
+  padding: 6px 12px;
+  min-width: 132px;
+}
+.tile .label { color: var(--ink-2); font-size: 12px; }
+.tile .value { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.tile .unit { color: var(--ink-2); font-size: 12px; font-weight: 400; }
+.charts {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.chart {
+  grid-column: span 3;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 8px;
+  padding: 6px 8px 4px;
+  position: relative;
+}
+.chart.wide { grid-column: span 4; }
+.chart figcaption { font-weight: 600; font-size: 12px; }
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  color: var(--ink-2);
+  font-size: 11px;
+  min-height: 15px;
+}
+.key { display: inline-flex; align-items: center; gap: 4px; }
+.key svg { flex: none; }
+.plot { flex: 1; min-height: 0; position: relative; }
+.plot svg { position: absolute; inset: 0; display: block; }
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 2;
+}
+.tooltip .row { display: flex; align-items: center; gap: 6px; }
+.tooltip strong { font-variant-numeric: tabular-nums; }
+.tooltip .name { color: var(--ink-2); }
+.tick { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.event-label { fill: var(--ink-2); font-size: 10px; }
+.empty { fill: var(--muted); font-size: 11px; }
+.robots { padding: 4px 16px 24px; }
+table { border-collapse: collapse; background: var(--surface); font-variant-numeric: tabular-nums; }
+th, td { padding: 3px 10px; text-align: right; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+@media (max-width: 900px) {
+  .top { height: auto; min-height: 0; }
+  .charts { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .chart, .chart.wide { grid-column: auto; height: 260px; }
+  .robots { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <header>
+    <h1>Inference gateway, second by second</h1>
+    <span id="source"></span>
+    <span id="status"><span class="dot"></span><span id="status-text">loading</span></span>
+  </header>
+  <section class="tiles" id="tiles" aria-label="Current values"></section>
+  <main class="charts" id="charts"></main>
+</div>
+<section class="robots">
+  <h2>Robots, at the latest point</h2>
+  <table id="robots"></table>
+</section>
+<script>
+"use strict";
+
+const MODELS = ["cls", "depth"];
+const SLOTS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"];
+const POLL_MS = 1000;
+const FETCH_TIMEOUT_MS = 900;
+// Points further apart than this are not joined: a snapshot is missing between them.
+const JOIN_LIMIT_S = 1.5;
+const TOOLTIP_ROWS = 8;
+const SVG = "http://www.w3.org/2000/svg";
+const MARGIN = { top: 8, right: 10, bottom: 18, left: 38 };
+
+// A robot keeps its color for as long as the page shows one source.
+const robotSlots = new Map();
+let shownSource = null;
+let lastDocument = null;
+const hover = new Map();
+
+function fill(node, attributes, text) {
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  // Robot ids and statuses come from the gateway: text, never markup.
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function el(tag, attributes = {}, text) {
+  return fill(document.createElement(tag), attributes, text);
+}
+
+function svgEl(tag, attributes = {}, text) {
+  return fill(document.createElementNS(SVG, tag), attributes, text);
+}
+
+function slotColor(index) {
+  return `var(${SLOTS[index]})`;
+}
+
+function format(value, digits) {
+  return value === null || value === undefined ? "–" : value.toFixed(digits);
+}
+
+function robotIds(points) {
+  const ids = [];
+  for (const point of points) {
+    for (const id of Object.keys(point.robots)) if (!ids.includes(id)) ids.push(id);
+  }
+  return ids.sort();
+}
+
+function robotSeries(points, model, field) {
+  const ids = robotIds(points).filter((id) =>
+    points.some((point) => point.robots[id] && point.robots[id].models[model]));
+  for (const id of ids) if (!robotSlots.has(id)) robotSlots.set(id, robotSlots.size);
+  // Past eight robots, no hue can name each one: every robot is drawn in one color and the
+  // table names them.
+  const crowded = ids.length > SLOTS.length;
+  return ids.map((id) => ({
+    label: id,
+    color: crowded ? slotColor(0) : slotColor(robotSlots.get(id) % SLOTS.length),
+    opacity: crowded ? 0.45 : 1,
+    value: (point) => {
+      const robot = point.robots[id];
+      return robot && robot.models[model] ? robot.models[model][field] : null;
+    },
+  }));
+}
+
+const CHARTS = [
+  {
+    id: "commands-cls", title: "Commands per second per robot, cls", digits: 1,
+    series: (points) => robotSeries(points, "cls", "commands_per_s"),
+  },
+  {
+    id: "commands-depth", title: "Commands per second per robot, depth", digits: 1,
+    series: (points) => robotSeries(points, "depth", "commands_per_s"),
+  },
+  {
+    id: "freshness-cls", title: "Freshness p95 per robot, cls (ms)", digits: 1, unit: "ms",
+    series: (points) => robotSeries(points, "cls", "freshness_p95_ms"),
+    reference: (last) => ({ value: last.models.cls.stale_ms, label: "stale threshold" }),
+  },
+  {
+    id: "freshness-depth", title: "Freshness p95 per robot, depth (ms)", digits: 1, unit: "ms",
+    series: (points) => robotSeries(points, "depth", "freshness_p95_ms"),
+    reference: (last) => ({ value: last.models.depth.stale_ms, label: "stale threshold" }),
+  },
+  {
+    id: "frames", title: "Frames per second per model", digits: 1, wide: true,
+    series: () => [
+      { label: "cls served", color: slotColor(0), value: (p) => p.models.cls.served_per_s },
+      { label: "cls overwritten", color: slotColor(1), value: (p) => p.models.cls.overwritten_per_s },
+      { label: "depth served", color: slotColor(2), value: (p) => p.models.depth.served_per_s },
+      { label: "depth overwritten", color: slotColor(3), value: (p) => p.models.depth.overwritten_per_s },
+    ],
+  },
+  {
+    id: "batch", title: "Mean batch size per model", digits: 2, wide: true,
+    series: () => MODELS.map((model, index) => ({
+      label: model, color: slotColor(index), value: (p) => p.models[model].mean_batch_size,
+    })),
+  },
+  {
+    id: "cpu", title: "CPU (cores)", digits: 2, wide: true, unit: "cores",
+    series: () => [
+      { label: "container", color: slotColor(0), value: (p) => p.cpu_cores.container },
+      { label: "gateway", color: slotColor(1), value: (p) => p.cpu_cores.gateway },
+      ...MODELS.map((model, index) => ({
+        label: `worker ${model}`, color: slotColor(index + 2),
+        value: (p) => p.cpu_cores[`worker_${model}`],
+      })),
+    ],
+    reference: (last) => ({ value: last.cpu_limit_cores, label: "limit" }),
+  },
+];
+
+function niceStep(span, count) {
+  const raw = span / count;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const fraction = raw / power;
+  return (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * power;
+}
+
+function ticks(low, high, step) {
+  const values = [];
+  for (let index = Math.ceil(low / step - 1e-9); index * step <= high + step * 1e-9; index += 1) {
+    values.push(Number((index * step).toPrecision(12)));
+  }
+  return values;
+}
+
+function buildChart(spec) {
+  const figure = el("figure", { class: spec.wide ? "chart wide" : "chart", id: spec.id });
+  figure.append(el("figcaption", {}, spec.title));
+  const legend = el("div", { class: "legend" });
+  const plot = el("div", { class: "plot" });
+  const tooltip = el("div", { class: "tooltip", hidden: "" });
+  plot.append(tooltip);
+  figure.append(legend, plot);
+  plot.addEventListener("pointermove", (event) => {
+    const box = plot.getBoundingClientRect();
+    hover.set(spec.id, event.clientX - box.left);
+    if (lastDocument) drawChart(spec, lastDocument.points);
+  });
+  plot.addEventListener("pointerleave", () => {
+    hover.delete(spec.id);
+    if (lastDocument) drawChart(spec, lastDocument.points);
+  });
+  document.getElementById("charts").append(figure);
+}
+
+function lineKey(color, opacity, dashed) {
+  const key = svgEl("svg", { width: "14", height: "8", "aria-hidden": "true" });
+  key.append(svgEl("line", {
+    x1: "1", y1: "4", x2: "13", y2: "4", stroke: color, "stroke-width": "2",
+    "stroke-linecap": "round", "stroke-opacity": String(opacity ?? 1),
+    ...(dashed ? { "stroke-dasharray": "3 2" } : {}),
+  }));
+  return key;
+}
+
+function drawLegend(legend, series, referenceLabel) {
+  legend.replaceChildren();
+  if (series.length > SLOTS.length) {
+    const key = el("span", { class: "key" });
+    key.append(lineKey(series[0].color, series[0].opacity), el("span", {}, `${series.length} robots, one line each`));
+    legend.append(key);
+  } else if (series.length > 1 || referenceLabel) {
+    for (const item of series) {
+      const key = el("span", { class: "key" });
+      key.append(lineKey(item.color, item.opacity), el("span", {}, item.label));
+      legend.append(key);
+    }
+  }
+  if (referenceLabel) {
+    const key = el("span", { class: "key" });
+    key.append(lineKey("var(--ink-2)", 1, true), el("span", {}, referenceLabel));
+    legend.append(key);
+  }
+}
+
+function segments(points, value, x, y) {
+  const paths = [];
+  let current = [];
+  let previous = null;
+  for (const point of points) {
+    const v = value(point);
+    const joined = previous !== null && point.t_s - previous <= JOIN_LIMIT_S;
+    if (v === null || !joined) {
+      if (current.length) paths.push(current);
+      current = [];
+    }
+    if (v !== null) current.push([x(point.t_s), y(v)]);
+    previous = point.t_s;
+  }
+  if (current.length) paths.push(current);
+  return paths;
+}
+
+function drawEvents(svg, points, x, width) {
+  const top = MARGIN.top;
+  for (const point of points) {
+    if (!point.events.length) continue;
+    const px = x(point.t_s);
+    svg.append(svgEl("line", {
+      x1: px, x2: px, y1: top, y2: svg.getAttribute("height") - MARGIN.bottom,
+      stroke: "var(--muted)", "stroke-width": "1",
+    }));
+    // The label runs down the marker, on the side with room for it.
+    const lx = px < width / 2 ? px + 11 : px - 3;
+    const more = point.events.length > 1 ? ` +${point.events.length - 1}` : "";
+    svg.append(svgEl("text", {
+      class: "event-label", x: lx, y: top + 2,
+      transform: `rotate(-90 ${lx} ${top + 2})`, "text-anchor": "end",
+    }, point.events[0] + more));
+  }
+}
+
+function drawHover(spec, svg, tooltip, points, series, x, y, width, plotHeight) {
+  const pointerX = hover.get(spec.id);
+  tooltip.hidden = true;
+  if (pointerX === undefined || !points.length) return;
+  let nearest = points[0];
+  for (const point of points) {
+    if (Math.abs(x(point.t_s) - pointerX) < Math.abs(x(nearest.t_s) - pointerX)) nearest = point;
+  }
+  const px = x(nearest.t_s);
+  svg.append(svgEl("line", { x1: px, x2: px, y1: MARGIN.top, y2: plotHeight, stroke: "var(--axis)", "stroke-width": "1" }));
+  tooltip.replaceChildren(el("div", { class: "name" }, `t = ${nearest.t_s.toFixed(1)} s`));
+  series.forEach((item, index) => {
+    const v = item.value(nearest);
+    if (v !== null) {
+      svg.append(svgEl("circle", {
+        cx: px, cy: y(v), r: "4", fill: item.color, stroke: "var(--surface)", "stroke-width": "2",
+      }));
+    }
+    if (index < TOOLTIP_ROWS) {
+      const row = el("div", { class: "row" });
+      row.append(lineKey(item.color, item.opacity), el("strong", {}, format(v, spec.digits)), el("span", { class: "name" }, item.label));
+      tooltip.append(row);
+    }
+  });
+  if (series.length > TOOLTIP_ROWS) {
+    tooltip.append(el("div", { class: "name" }, `+${series.length - TOOLTIP_ROWS} more in the table below`));
+  }
+  if (nearest.events.length) tooltip.append(el("div", { class: "name" }, nearest.events.join(", ")));
+  tooltip.hidden = false;
+  const left = px + 12 + tooltip.offsetWidth > width ? px - 12 - tooltip.offsetWidth : px + 12;
+  tooltip.style.left = `${Math.max(0, left)}px`;
+  tooltip.style.top = `${MARGIN.top}px`;
+}
+
+function drawChart(spec, points) {
+  const figure = document.getElementById(spec.id);
+  const legend = figure.querySelector(".legend");
+  const plot = figure.querySelector(".plot");
+  const tooltip = plot.querySelector(".tooltip");
+  const width = plot.clientWidth;
+  const height = plot.clientHeight;
+  const svg = svgEl("svg", { width, height, role: "img", "aria-label": spec.title });
+  const series = spec.series(points);
+  const last = points.length ? points[points.length - 1] : null;
+  const reference = spec.reference && last ? spec.reference(last) : null;
+  const shownReference = reference && reference.value !== null ? reference : null;
+  drawLegend(legend, series, shownReference && `${shownReference.label} ${shownReference.value} ${spec.unit}`);
+  plot.querySelector("svg")?.remove();
+  plot.prepend(svg);
+  if (!points.length) {
+    svg.append(svgEl("text", { class: "empty", x: width / 2, y: height / 2, "text-anchor": "middle" }, "no points yet"));
+    tooltip.hidden = true;
+    return;
+  }
+  const plotBottom = height - MARGIN.bottom;
+  const first = Math.floor(points[0].t_s);
+  const lastT = last.t_s > first ? last.t_s : first + 1;
+  let highest = shownReference ? shownReference.value : 0;
+  for (const item of series) {
+    for (const point of points) {
+      const v = item.value(point);
+      if (v !== null && v > highest) highest = v;
+    }
+  }
+  // The y axis starts at zero and ends on the first tick above the highest value, so a line
+  // at the highest value never runs along the top edge.
+  const headroom = highest > 0 ? highest * 1.05 : 1;
+  const yStep = niceStep(headroom, 4);
+  const yMax = Math.ceil(headroom / yStep - 1e-9) * yStep;
+  const x = (t) => MARGIN.left + ((t - first) / (lastT - first)) * (width - MARGIN.left - MARGIN.right);
+  const y = (v) => plotBottom - (v / yMax) * (plotBottom - MARGIN.top);
+  for (const value of ticks(0, yMax, yStep)) {
+    svg.append(svgEl("line", {
+      x1: MARGIN.left, x2: width - MARGIN.right, y1: y(value), y2: y(value),
+      stroke: value === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": "1",
+    }));
+    svg.append(svgEl("text", { class: "tick", x: MARGIN.left - 4, y: y(value) + 3, "text-anchor": "end" }, String(value)));
+  }
+  const tStep = niceStep(lastT - first, Math.max(2, Math.floor(width / 70)));
+  for (const value of ticks(first, lastT, tStep)) {
+    svg.append(svgEl("text", { class: "tick", x: x(value), y: height - 4, "text-anchor": "middle" }, `${value} s`));
+  }
+  drawEvents(svg, points, x, width);
+  if (shownReference) {
+    const ry = y(shownReference.value);
+    svg.append(svgEl("line", {
+      x1: MARGIN.left, x2: width - MARGIN.right, y1: ry, y2: ry,
+      stroke: "var(--ink-2)", "stroke-width": "1", "stroke-dasharray": "5 4",
+    }));
+  }
+  for (const item of series) {
+    for (const path of segments(points, item.value, x, y)) {
+      if (path.length === 1) {
+        svg.append(svgEl("circle", { cx: path[0][0], cy: path[0][1], r: "2", fill: item.color, "fill-opacity": String(item.opacity ?? 1) }));
+        continue;
+      }
+      svg.append(svgEl("path", {
+        d: "M" + path.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join("L"),
+        fill: "none", stroke: item.color, "stroke-width": "2", "stroke-linejoin": "round",
+        "stroke-linecap": "round", "stroke-opacity": String(item.opacity ?? 1),
+      }));
+    }
+  }
+  drawHover(spec, svg, tooltip, points, series, x, y, width, plotBottom);
+}
+
+function stateClass(state) {
+  return state === "ready" ? "good" : state === "failed" ? "critical" : "warning";
+}
+
+function tile(label, value, unit, dotClass) {
+  const node = el("div", { class: "tile" });
+  const line = el("div", { class: "value" });
+  if (dotClass) line.append(el("span", { class: `dot ${dotClass}` }));
+  line.append(el("span", {}, value));
+  if (unit) line.append(el("span", { class: "unit" }, unit));
+  node.append(el("div", { class: "label" }, label), line);
+  return node;
+}
+
+function drawTiles(last) {
+  const tiles = document.getElementById("tiles");
+  const memory = last && last.memory_bytes !== null ? (last.memory_bytes / 2 ** 20).toFixed(0) : null;
+  tiles.replaceChildren(
+    tile("Connected robots", last ? String(last.connections) : "–"),
+    tile("Memory", memory ?? "–", "MiB"),
+    tile("Loop lag p99", last ? format(last.loop_lag_p99_ms, 2) : "–", "ms"),
+    ...MODELS.map((model) => {
+      const entry = last ? last.models[model] : null;
+      return tile(
+        `Worker ${model}`,
+        entry ? `${entry.worker_state}, restarts ${entry.worker_restarts}` : "–",
+        null,
+        entry ? stateClass(entry.worker_state) : null,
+      );
+    }),
+  );
+}
+
+function drawTable(last) {
+  const table = document.getElementById("robots");
+  const head = el("tr");
+  head.append(el("th", {}, "Robot"), el("th", {}, "Connected"));
+  for (const model of MODELS) {
+    head.append(el("th", {}, `${model} commands/s`), el("th", {}, `${model} freshness p95 ms`), el("th", {}, `${model} stale`));
+  }
+  const rows = [head];
+  for (const id of last ? Object.keys(last.robots).sort() : []) {
+    const robot = last.robots[id];
+    const row = el("tr");
+    row.append(el("td", {}, id), el("td", {}, robot.connected ? "yes" : "no"));
+    for (const model of MODELS) {
+      const entry = robot.models[model];
+      row.append(
+        el("td", {}, entry ? format(entry.commands_per_s, 1) : "–"),
+        el("td", {}, entry ? format(entry.freshness_p95_ms, 1) : "–"),
+        el("td", {}, entry && entry.commands_stale !== null ? String(entry.commands_stale) : "–"),
+      );
+    }
+    rows.push(row);
+  }
+  table.replaceChildren(...rows);
+}
+
+function showStatus(text, dotClass) {
+  document.getElementById("status-text").textContent = text;
+  document.querySelector("#status .dot").className = `dot ${dotClass}`;
+}
+
+function render(data) {
+  if (data.source !== shownSource) {
+    robotSlots.clear();
+    shownSource = data.source;
+  }
+  lastDocument = data;
+  document.getElementById("source").textContent = data.source;
+  const settled = data.status === "ok" || data.status === "replay finished";
+  showStatus(data.status, settled ? "good" : "warning");
+  const last = data.points.length ? data.points[data.points.length - 1] : null;
+  drawTiles(last);
+  for (const spec of CHARTS) drawChart(spec, data.points);
+  drawTable(last);
+}
+
+async function poll() {
+  const started = performance.now();
+  try {
+    const reply = await fetch("/data", { cache: "no-store", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!reply.ok) throw new Error(`HTTP ${reply.status}`);
+    render(await reply.json());
+  } catch {
+    showStatus("dashboard server not reachable", "critical");
+  }
+  setTimeout(poll, Math.max(0, POLL_MS - (performance.now() - started)));
+}
+
+for (const spec of CHARTS) buildChart(spec);
+drawTiles(null);
+drawTable(null);
+window.addEventListener("resize", () => { if (lastDocument) render(lastDocument); });
+poll();
+</script>
+</body>
+</html>
