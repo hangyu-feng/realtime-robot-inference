@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from bench.fault import POLL_INTERVAL_S, T0_WAIT_S, FaultError, inject, main
+from bench.fault import PID_LEAD_S, POLL_INTERVAL_S, T0_WAIT_S, FaultError, inject, main
 from bench.live_check import MetricsUnavailable
 from bench.runfiles import CONFIG_FILE, EVENTS_FILE, Event, EventName, FleetConfig, RunConfig
 from bench.runplan import planned_events, run_id
@@ -53,6 +53,7 @@ class Container:
     metrics: Mapping[str, object] | None = field(default_factory=lambda: READY)
     sleep_share: float = 1.0
     kill_error: OSError | None = None
+    fetch_takes_ns: int = 0
     clock: FakeClock = field(default_factory=lambda: FakeClock(START_NS))
     fetched_ns: list[int] = field(default_factory=list)
     killed: list[tuple[int, int, int]] = field(default_factory=list)
@@ -69,6 +70,7 @@ class Container:
 
     def fetch(self) -> Mapping[str, object]:
         self.fetched_ns.append(self.clock.now_ns())
+        self.clock.advance_ns(self.fetch_takes_ns)
         if self.metrics is None:
             raise MetricsUnavailable("GET http://127.0.0.1:8080/metrics failed: refused")
         return self.metrics
@@ -113,10 +115,18 @@ def test_the_worker_is_killed_with_sigkill_at_t0_plus_the_planned_time(
 
     event = container.run_injector()
 
-    assert container.fetched_ns == [KILL_NS]
+    assert container.fetched_ns == [KILL_NS - round(PID_LEAD_S * NS_PER_S)]
     assert container.killed == [(DEPTH_PID, signal.SIGKILL, KILL_NS)]
     # The time is read once the kill has returned.
     assert event == Event(EventName.FAULT, 20.00025, model="depth", pid=DEPTH_PID)
+
+
+def test_a_slow_metrics_reply_does_not_delay_the_kill(run_dir: Path) -> None:
+    container = Container(run_dir, writes=[(START_NS, T0_LINE)], fetch_takes_ns=NS_PER_S // 5)
+
+    container.run_injector()
+
+    assert container.killed == [(DEPTH_PID, signal.SIGKILL, KILL_NS)]
 
 
 def test_a_t0_line_that_appears_after_polls_is_waited_for_until_it_is_complete(
@@ -180,7 +190,7 @@ def test_a_worker_that_is_not_ready_with_a_pid_is_not_killed(
     with pytest.raises(FaultError):
         container.run_injector()
 
-    assert container.fetched_ns == [KILL_NS]
+    assert container.fetched_ns == [KILL_NS - round(PID_LEAD_S * NS_PER_S)]
     assert container.killed == []
 
 

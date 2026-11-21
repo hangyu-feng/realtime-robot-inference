@@ -34,6 +34,11 @@ from common.errors import ConfigError
 # is bounded for a driver that never writes it.
 POLL_INTERVAL_S = 0.1
 T0_WAIT_S = 60.0
+# The worker's pid is read this long before the kill, so that a slow /metrics reply, under a
+# quota freeze or with many robots, does not delay the kill past its planned time. A worker
+# that restarts inside this lead is killed by its old pid and fails the run, which the
+# summary's worker_restarted check would also catch.
+PID_LEAD_S = 1.0
 
 _NS_PER_S = 1_000_000_000
 
@@ -102,6 +107,12 @@ def _ready_pid(fetch: Fetch, model: str) -> int:
     return pid
 
 
+def _sleep_until(due_ns: int, clock: Clock, sleep: Callable[[float], None]) -> None:
+    # A sleep may end before its time, so the clock decides when it is over.
+    while (now_ns := clock.now_ns()) < due_ns:
+        sleep((due_ns - now_ns) / _NS_PER_S)
+
+
 def inject(
     run_dir: Path, clock: Clock, sleep: Callable[[float], None], fetch: Fetch, kill: Kill
 ) -> Event:
@@ -114,10 +125,9 @@ def inject(
     fault = _planned_kill(run_dir)
     t0_ns = _t0_ns(run_dir / EVENTS_FILE, clock, sleep)
     kill_at_ns = t0_ns + round(fault.at_s * _NS_PER_S)
-    # A sleep may end before its time, so the clock decides when it is over.
-    while (now_ns := clock.now_ns()) < kill_at_ns:
-        sleep((kill_at_ns - now_ns) / _NS_PER_S)
+    _sleep_until(kill_at_ns - round(PID_LEAD_S * _NS_PER_S), clock, sleep)
     pid = _ready_pid(fetch, fault.model)
+    _sleep_until(kill_at_ns, clock, sleep)
     try:
         kill(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError) as error:
