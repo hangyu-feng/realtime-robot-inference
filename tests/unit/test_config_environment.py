@@ -251,7 +251,6 @@ def test_every_model_setting_takes_its_default_as_json(key: str, name: str) -> N
         pytest.param('"text"', "must be a JSON object", id="string-not-an-object"),
         pytest.param("{", "not valid JSON", id="invalid-json"),
         pytest.param('{"port": ' + "1" * 5000 + "}", "not valid JSON", id="5000-digit-integer"),
-        pytest.param("[" * 100_000 + "]" * 100_000, "not valid JSON", id="deep-nesting"),
     ],
 )
 def test_bad_overrides_are_refused_naming_the_variable_and_the_key_path(
@@ -259,6 +258,13 @@ def test_bad_overrides_are_refused_naming_the_variable_and_the_key_path(
 ) -> None:
     with pytest.raises(ConfigError, match=f"^RRI_OVERRIDES: {re.escape(message)}"):
         load_config({"RRI_OVERRIDES": text})
+
+
+def test_deeply_nested_overrides_are_refused_with_a_config_error() -> None:
+    # Whether json.loads gets through this depth depends on the C stack the interpreter finds,
+    # so the refusal comes from the parser on one machine and from the object check on another.
+    with pytest.raises(ConfigError, match=r"^RRI_OVERRIDES: "):
+        load_config({"RRI_OVERRIDES": "[" * 100_000 + "]" * 100_000})
 
 
 @pytest.mark.parametrize(
