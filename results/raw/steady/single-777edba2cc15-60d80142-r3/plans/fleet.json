@@ -1,0 +1,11 @@
+{
+  "duration_s": 30.0,
+  "robots": [
+    {
+      "robot_id": "a",
+      "start_s": 0.0,
+      "stop_s": null
+    }
+  ],
+  "t0_mono_ns": 1367689774515
+}

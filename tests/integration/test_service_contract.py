@@ -61,10 +61,10 @@ def test_live_metrics_have_exactly_the_contract_fields(service: Service, tmp_pat
         connected.send_signal(signal.SIGTERM)
         connected_status = connected.wait(fleet_timeout_s(connected_plan))
 
-    design = (REPO_ROOT / "DESIGN.md").read_text()
+    contract = (REPO_ROOT / "docs" / "metrics.md").read_text(encoding="utf-8")
     assert connected_status == 0
     assert snapshot["robots"]["t16here"]["connected"]
-    assert snapshot_fields(snapshot) == contract_fields(design)
+    assert snapshot_fields(snapshot) == contract_fields(contract)
 
 
 @pytest.mark.skipif(

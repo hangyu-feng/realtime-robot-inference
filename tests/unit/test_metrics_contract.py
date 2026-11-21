@@ -1,4 +1,4 @@
-"""Tests that a rendered /metrics snapshot has exactly the fields DESIGN.md section 10 states."""
+"""Tests that a rendered /metrics snapshot has exactly the fields docs/metrics.md states."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -20,10 +20,10 @@ from tests.unit.test_metrics import (
     warming_world,
 )
 
-DESIGN = (Path(__file__).resolve().parents[2] / "DESIGN.md").read_text(encoding="utf-8")
+CONTRACT = (Path(__file__).resolve().parents[2] / "docs/metrics.md").read_text(encoding="utf-8")
 
-# A design text with the shapes the parser reads, around text it must pass over.
-DESIGN_SAMPLE = """
+# A contract text with the shapes the parser reads, around text it must pass over.
+CONTRACT_SAMPLE = """
 ## 10. Metrics contract
 
 `GET /metrics`, in prose before the tables, names no field.
@@ -130,7 +130,7 @@ def all_reporting_world() -> World:
 
 
 def test_contract_fields_reads_each_table_into_the_path_of_its_object() -> None:
-    assert contract_fields(DESIGN_SAMPLE) == {
+    assert contract_fields(CONTRACT_SAMPLE) == {
         "": frozenset(("schema", "uptime_s", "robots", "config")),
         "robots.<id>": frozenset(("bytes_in", "bytes_out", "models", "telemetry")),
         "robots.<id>.models.<m>": frozenset(("in_flight",)),
@@ -159,7 +159,7 @@ def test_contract_fields_reads_each_table_into_the_path_of_its_object() -> None:
 
 
 def test_contract_types_reads_the_type_of_every_scalar_outside_the_config_echo() -> None:
-    assert contract_types(DESIGN_SAMPLE) == {
+    assert contract_types(CONTRACT_SAMPLE) == {
         "": {"schema": "int", "uptime_s": "float or null"},
         "robots.<id>": {"bytes_in": "int", "bytes_out": "int"},
         "robots.<id>.models.<m>": {"in_flight": "int"},
@@ -247,7 +247,7 @@ def test_snapshot_fields_refuses_a_value_where_the_contract_has_an_object() -> N
 def test_a_snapshot_of_full_state_has_exactly_the_fields_of_the_design_at_every_path() -> None:
     snapshot = all_reporting_world().snapshot()
 
-    assert snapshot_fields(snapshot) == contract_fields(DESIGN)
+    assert snapshot_fields(snapshot) == contract_fields(CONTRACT)
 
 
 @pytest.mark.parametrize("robot_id", ["a", "b", "c"])
@@ -258,7 +258,7 @@ def test_each_robot_entry_alone_has_exactly_the_fields_of_the_design(robot_id: s
 
     alone = snapshot | {"robots": {robot_id: robots[robot_id]}}
 
-    assert snapshot_fields(alone) == contract_fields(DESIGN)
+    assert snapshot_fields(alone) == contract_fields(CONTRACT)
 
 
 @pytest.mark.parametrize(
@@ -269,7 +269,7 @@ def test_each_robot_entry_alone_has_exactly_the_fields_of_the_design(robot_id: s
 def test_every_scalar_of_a_snapshot_has_the_json_type_of_the_design(
     build: Callable[[], World],
 ) -> None:
-    types = contract_types(DESIGN)
+    types = contract_types(CONTRACT)
 
     violations = type_violations(build().snapshot(), types)
 
@@ -282,7 +282,7 @@ def test_every_scalar_of_a_snapshot_has_the_json_type_of_the_design(
 def test_a_snapshot_taken_during_warm_up_has_the_fields_of_the_design_at_every_path_it_has() -> (
     None
 ):
-    contract = contract_fields(DESIGN)
+    contract = contract_fields(CONTRACT)
 
     fields = snapshot_fields(warming_world().snapshot())
 

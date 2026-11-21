@@ -1,10 +1,10 @@
-"""The /metrics contract: its field names and scalar types, as DESIGN.md states them and as a
-snapshot has them.
+"""The /metrics contract: its field names and scalar types, as docs/metrics.md states them and
+as a snapshot has them.
 
 Every function keys its result by object path, with a placeholder for every key that names an
 instance: "robots.<id>.models.<m>", "processes.<p>". A test compares the two sides, so a field
-or its JSON type cannot change in /metrics without changing in DESIGN.md section 10, or the
-other way round.
+or its JSON type cannot change in /metrics without changing in docs/metrics.md, or the other
+way round.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping
 from types import MappingProxyType
 
-# The subsections of DESIGN.md section 10 that hold the field tables, and the one whose table
-# is the config echo.
+# The subsections of section 10, in docs/metrics.md, that hold the field tables, and the one
+# whose table is the config echo.
 _SUBSECTION = re.compile(r"### 10\.(\d+) (.*)")
 _FIRST_TABLE_SUBSECTION = 2
 _CONFIG_SUBSECTION = 8
@@ -53,8 +53,8 @@ def _join(path: str, name: str) -> str:
     return f"{path}.{name}" if path else name
 
 
-def contract_fields(design_text: str) -> dict[str, frozenset[str]]:
-    """Read the field names of every object path from DESIGN.md sections 10.2 to 10.8.
+def contract_fields(contract_text: str) -> dict[str, frozenset[str]]:
+    """Read the field names of every object path from sections 10.2 to 10.8 of the contract.
 
     A table belongs to the object that its section heading names in backticks, or that the
     paragraph above it starts with, and to the top level without either. Its fields are the
@@ -69,7 +69,7 @@ def contract_fields(design_text: str) -> dict[str, frozenset[str]]:
     column; alternatives joined with "or" and prose are not fields.
     """
     fields: defaultdict[str, set[str]] = defaultdict(set)
-    for subsection, path, names, second in _table_rows(design_text):
+    for subsection, path, names, second in _table_rows(contract_text):
         for name in names:
             segments = name.split(".")
             fields[path].add(segments[0])
@@ -85,15 +85,15 @@ def contract_fields(design_text: str) -> dict[str, frozenset[str]]:
     return {path: frozenset(names) for path, names in fields.items()}
 
 
-def contract_types(design_text: str) -> dict[str, dict[str, str]]:
-    """Read the Type column of every scalar field from DESIGN.md sections 10.2 to 10.7.
+def contract_types(contract_text: str) -> dict[str, dict[str, str]]:
+    """Read the Type column of every scalar field from sections 10.2 to 10.7 of the contract.
 
     The result maps an object path to its scalar fields and their types: int, float, bool or
     string, each possibly followed by " or null". Objects, lists and histograms are left out,
     and so is the config echo, whose table has no Type column.
     """
     types: defaultdict[str, dict[str, str]] = defaultdict(dict)
-    for subsection, path, names, second in _table_rows(design_text):
+    for subsection, path, names, second in _table_rows(contract_text):
         if subsection == _CONFIG_SUBSECTION or second.removesuffix(_OR_NULL) not in _SCALAR_TYPES:
             continue
         for name in names:
@@ -103,8 +103,8 @@ def contract_types(design_text: str) -> dict[str, dict[str, str]]:
     return dict(types)
 
 
-def _table_rows(design_text: str) -> Iterator[tuple[int, str, list[str], str]]:
-    """Yield every table row of DESIGN.md sections 10.2 to 10.8.
+def _table_rows(contract_text: str) -> Iterator[tuple[int, str, list[str], str]]:
+    """Yield every table row of sections 10.2 to 10.8 of the contract.
 
     A row is its subsection's number, the path of the object its table belongs to, the
     backticked names of its first column, and the text of its second column.
@@ -112,7 +112,7 @@ def _table_rows(design_text: str) -> Iterator[tuple[int, str, list[str], str]]:
     # 0 outside the subsections that hold the tables.
     subsection = 0
     path = ""
-    for line in design_text.splitlines():
+    for line in contract_text.splitlines():
         heading = _SUBSECTION.fullmatch(line)
         if heading is not None:
             number = int(heading[1])
@@ -120,7 +120,7 @@ def _table_rows(design_text: str) -> Iterator[tuple[int, str, list[str], str]]:
             named = _NAME.search(heading[2])
             path = "" if named is None else named[1]
         elif line.startswith("## "):
-            # Section 11 ends the contract.
+            # The next section ends the contract.
             subsection = 0
         elif subsection and (label := _TABLE_LABEL.match(line)) is not None:
             path = label[1]

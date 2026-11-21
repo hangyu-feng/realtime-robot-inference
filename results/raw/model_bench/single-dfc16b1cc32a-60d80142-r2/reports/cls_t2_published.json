@@ -1,0 +1,138 @@
+{
+  "kind": "model_bench.batch",
+  "args": {
+    "command": "batch",
+    "model": "cls",
+    "graph": "published",
+    "threads": 2,
+    "spinning": "off",
+    "batch_sizes": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "min_iterations": 30,
+    "min_seconds": 2.0,
+    "warmup_iterations": 5,
+    "out": "/app/results/raw/model_bench/single-dfc16b1cc32a-60d80142-r2/reports/cls_t2_published.json"
+  },
+  "environment": {
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900",
+    "cpu_count_visible": 32,
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "cgroup": {
+      "version": 2,
+      "cpu_limit_cores": 2.0,
+      "cpu_period_us": 100000,
+      "memory_limit_bytes": 4294967296,
+      "memory_swap_limit_bytes": 0,
+      "cpuset": "0-31"
+    },
+    "python": "3.14.10",
+    "packages": {
+      "onnxruntime": "1.32.0",
+      "numpy": "2.5.5",
+      "opencv-python-headless": "5.1.0.95",
+      "websockets": "17.4",
+      "uvloop": "0.23.0",
+      "onnx": "1.23.2"
+    },
+    "model_sha256": {
+      "midas_small.onnx": "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58",
+      "midas_small_batched.onnx": "c2879a09b49dc4fa87211df74d982ae3b3c78aa11d8f2cdcc0498b9c890b86c0",
+      "mobilenetv3_small.onnx": "d36eea8c3298d339c232581dff18beed6651eacd607d0a531b7bdb100f8dc713"
+    },
+    "start_utc": "2026-11-21T01:05:26+00:00"
+  },
+  "frames": {
+    "count": 32,
+    "jpeg_quality": 80,
+    "min_bytes": 40459,
+    "mean_bytes": 40678.78125,
+    "max_bytes": 40981
+  },
+  "results": [
+    {
+      "batch_size": 1,
+      "iterations": 495,
+      "wall_ms": {
+        "count": 495,
+        "mean": 4.029738638383838,
+        "min": 3.378971,
+        "p50": 3.917959,
+        "p95": 4.912827999999998,
+        "p99": 5.489343600000001,
+        "max": 6.071161
+      },
+      "mean_cpu_ms": 5.478250606060606,
+      "mean_decode_ms": 0.849989995959596,
+      "mean_preprocess_ms": 0.33781079595959596,
+      "mean_inference_ms": 2.765944967676768,
+      "mean_postprocess_ms": 0.05795700404040404,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    },
+    {
+      "batch_size": 2,
+      "iterations": 296,
+      "wall_ms": {
+        "count": 296,
+        "mean": 6.744754834459459,
+        "min": 5.728234,
+        "p50": 6.65644,
+        "p95": 7.77891075,
+        "p99": 8.2088215,
+        "max": 8.68699
+      },
+      "mean_cpu_ms": 9.346708486486486,
+      "mean_decode_ms": 0.8431372212837838,
+      "mean_preprocess_ms": 0.3247031706081081,
+      "mean_inference_ms": 4.312534402027027,
+      "mean_postprocess_ms": 0.03687849831081081,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    },
+    {
+      "batch_size": 4,
+      "iterations": 171,
+      "wall_ms": {
+        "count": 171,
+        "mean": 11.690579538011693,
+        "min": 10.211248,
+        "p50": 11.577735,
+        "p95": 13.1333065,
+        "p99": 14.960825700000008,
+        "max": 16.005107
+      },
+      "mean_cpu_ms": 16.370529403508773,
+      "mean_decode_ms": 0.8453705453216375,
+      "mean_preprocess_ms": 0.31779290350877193,
+      "mean_inference_ms": 6.916869327485379,
+      "mean_postprocess_ms": 0.023070633040935675,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    },
+    {
+      "batch_size": 8,
+      "iterations": 94,
+      "wall_ms": {
+        "count": 94,
+        "mean": 21.29478940425532,
+        "min": 18.609339,
+        "p50": 21.2023285,
+        "p95": 23.63743925,
+        "p99": 24.623419109999997,
+        "max": 24.923877
+      },
+      "mean_cpu_ms": 29.91949540425532,
+      "mean_decode_ms": 0.8624084614361702,
+      "mean_preprocess_ms": 0.3241391981382979,
+      "mean_inference_ms": 11.640540212765957,
+      "mean_postprocess_ms": 0.015010357712765958,
+      "nr_throttled": 0,
+      "throttled_us": 0
+    }
+  ]
+}
