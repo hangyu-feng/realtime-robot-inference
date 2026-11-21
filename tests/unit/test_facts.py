@@ -12,6 +12,8 @@ from hypothesis import strategies as st
 from bench.candidates import CANDIDATES
 from bench.facts import (
     BREAKDOWN_STAGES,
+    PACING_CONTROL,
+    PACING_PRICE_PATH,
     PLACEHOLDER,
     RECOVERY_SHARE,
     REGISTRY,
@@ -401,6 +403,16 @@ def test_only_the_one_thread_cap_of_one_reads_the_published_depth_graph(
     )
 
 
+def test_the_batched_depth_graph_is_also_read_at_the_one_thread_cap_of_one() -> None:
+    entry = REGISTRY["model_bench.depth.batched.t1.b1.wall_ms"]
+
+    assert (entry.path, entry.unit, entry.combine) == (
+        ("tables", "depth", "t1", "batched", "1", "wall_ms"),
+        "ms",
+        Combine.MEDIAN,
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "unit"),
     [
@@ -519,7 +531,7 @@ def test_the_registry_holds_every_key_family_of_the_design_document() -> None:
     assert [key for key in families if key not in REGISTRY] == []
 
 
-def test_the_worker_kill_keys_read_the_outage_and_each_models_rate_before_and_after() -> None:
+def test_the_worker_kill_keys_read_the_outage_the_kill_and_each_models_rate_around_it() -> None:
     keys = {
         key: (entry.topology, entry.source, entry.path, entry.unit, entry.combine, entry.integer)
         for key, entry in REGISTRY.items()
@@ -539,6 +551,18 @@ def test_the_worker_kill_keys_read_the_outage_and_each_models_rate_before_and_af
             )
             for prefix, topology in (("", Topology.SINGLE), ("split.", Topology.SPLIT))
         },
+        # The latest kill of the runs bounds how late every kill was.
+        **{
+            f"{prefix}worker_kill.depth.kill_late_ms.max": (
+                topology,
+                Source.SUMMARY,
+                ("fault", "late_ms"),
+                "ms",
+                Combine.LARGEST,
+                False,
+            )
+            for prefix, topology in (("", Topology.SINGLE), ("split.", Topology.SPLIT))
+        },
         **{
             f"{prefix}worker_kill.{window}.{model}.commands_per_s_per_robot.mean": (
                 topology,
@@ -553,7 +577,7 @@ def test_the_worker_kill_keys_read_the_outage_and_each_models_rate_before_and_af
             for model in MODEL_KEYS
         },
     }
-    assert len(keys) == 10
+    assert len(keys) == 12
 
 
 def test_the_breakdown_holds_three_statistics_of_each_of_the_ten_stages_per_model() -> None:
@@ -577,18 +601,42 @@ def test_the_breakdown_holds_three_statistics_of_each_of_the_ten_stages_per_mode
     assert {entry.scenario_key for entry in breakdown} == {"sweep_n5"}
 
 
-def test_every_candidate_has_its_three_ledger_keys_with_the_unit_of_its_main_metric() -> None:
-    ledger = {key: entry.unit for key, entry in REGISTRY.items() if entry.source is Source.LEDGER}
+def test_every_candidate_has_its_three_ledger_keys_and_pacing_its_price_per_arm() -> None:
+    ledger = {
+        key: (entry.path, entry.unit)
+        for key, entry in REGISTRY.items()
+        if entry.source is Source.LEDGER
+    }
 
     assert ledger == {
-        f"ledger.{candidate.name}.{field}": unit
-        for candidate in CANDIDATES
-        for field, unit in (
-            ("outcome", ""),
-            ("main_delta", metric_unit(candidate.main.path)),
-            ("baseline_spread", metric_unit(candidate.main.path)),
-        )
+        **{
+            f"ledger.{candidate.name}.{field}": ((candidate.name, field), unit)
+            for candidate in CANDIDATES
+            for field, unit in (
+                ("outcome", ""),
+                ("main_delta", metric_unit(candidate.main.path)),
+                ("baseline_spread", metric_unit(candidate.main.path)),
+            )
+        },
+        **{
+            f"ledger.depth_unpaced.depth_rate.{arm}_median": (
+                (
+                    "depth_unpaced",
+                    "metrics",
+                    "models.depth.all.commands_per_s_per_robot.mean",
+                    f"{arm}_median",
+                ),
+                "commands/s",
+            )
+            for arm in ("a", "b")
+        },
     }
+
+
+def test_the_control_that_turns_pacing_off_guards_the_depth_rate_its_price_is_read_from() -> None:
+    (control,) = (candidate for candidate in CANDIDATES if candidate.name == PACING_CONTROL)
+
+    assert PACING_PRICE_PATH in {guard.path for guard in control.guards}
 
 
 @pytest.mark.parametrize(

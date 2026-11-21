@@ -997,12 +997,15 @@ def read_failed_checks(results: Path) -> list[dict[str, Any]]:
     return listed(results, FAILED_CHECKS_FILE)
 
 
-def test_the_worker_kill_facts_are_the_medians_of_their_counted_runs(tmp_path: Path) -> None:
+def test_the_worker_kill_facts_are_medians_but_the_kill_is_the_latest_of_the_runs(
+    tmp_path: Path,
+) -> None:
     run_values = [(1500.0, 30.0, 29.0), (1700.0, 29.0, 31.0), (1600.0, 28.0, 30.0)]
     for repeat, (outage_ms, before, after) in enumerate(run_values, start=1):
         summary = nested(
             {
                 "fault.outage_ms": outage_ms,
+                "fault.late_ms": outage_ms / 100,
                 "models.cls.before.commands_per_s_per_robot.mean": before,
                 "models.cls.after.commands_per_s_per_robot.mean": after,
             }
@@ -1023,6 +1026,8 @@ def test_the_worker_kill_facts_are_the_medians_of_their_counted_runs(tmp_path: P
     )
     assert facts["worker_kill.before.cls.commands_per_s_per_robot.mean"].value == 29.0
     assert facts["worker_kill.after.cls.commands_per_s_per_robot.mean"].value == 30.0
+    # The latest kill, not the median one.
+    assert facts["worker_kill.depth.kill_late_ms.max"].value == 17.0
     assert facts["split.worker_kill.depth.outage_ms"].value == 2000.0
     # No summary holds a depth rate, though three runs stand behind the key.
     depth_before = facts["worker_kill.before.depth.commands_per_s_per_robot.mean"]
@@ -1040,7 +1045,7 @@ def test_the_worker_kill_facts_of_the_summarizers_own_summary_are_numbers(tmp_pa
         for key, entry in REGISTRY.items()
         if (entry.scenario_key, entry.topology) == ("worker_kill", Topology.SINGLE)
     ]
-    assert len(keys) == 5
+    assert len(keys) == 6
     assert {key: facts[key].value for key in keys if not isinstance(facts[key].value, float)} == {}
     # Every synthetic robot gets a classifier command per frame, before the kill and after it.
     rates = [
@@ -1309,8 +1314,31 @@ def test_the_ledger_holds_each_metric_per_arm_with_both_spreads_and_the_outcome(
     assert facts["ledger.cls_cap_1.outcome"].value == NOT_RUN
     assert facts["ledger.cls_cap_1.main_delta"].value is None
     assert facts["ledger.depth_unpaced.outcome"].value == NOT_RUN
+    assert facts["ledger.depth_unpaced.depth_rate.a_median"].value is None
     # A comparison run is behind no demo fact.
     assert len(facts["steady.cls.commands_per_s"].run_ids) == 1
+
+
+def test_the_price_of_pacing_is_the_median_depth_rate_of_each_arm_of_its_control(
+    tmp_path: Path,
+) -> None:
+    control = next(candidate for candidate in CANDIDATES if candidate.name == "depth_unpaced")
+    rate = "models.depth.all.commands_per_s_per_robot.mean"
+    paths = (control.main.path, *(guard.path for guard in control.guards))
+    others = dict.fromkeys(paths, 1.0)
+    # The plan runs the arms A, B, B, A.
+    for spec, depth_rate in zip(
+        compare_plan(control, runs.CODE_DIGEST), [0.10, 0.18, 0.17, 0.11], strict=True
+    ):
+        write_given(tmp_path, spec, comparison_summary(control, {**others, rate: depth_rate}))
+
+    facts = built(tmp_path)
+
+    paced = facts["ledger.depth_unpaced.depth_rate.a_median"]
+    unpaced = facts["ledger.depth_unpaced.depth_rate.b_median"]
+    assert paced.value == pytest.approx(0.105)
+    assert unpaced.value == pytest.approx(0.175)
+    assert (paced.unit, paced.runs, len(unpaced.run_ids)) == ("commands/s", 2, 4)
 
 
 def test_a_comparison_run_without_a_metric_is_an_unreadable_input(tmp_path: Path) -> None:

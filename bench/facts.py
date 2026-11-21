@@ -20,6 +20,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from bench.candidates import CANDIDATES
+from bench.runfiles import ARMS
 from bench.runplan import MODEL_BENCH_KEY, SWEEP_ROBOT_COUNTS
 from bench.scenarios import massive, sweep, worker_kill
 from cloud.config import Topology
@@ -43,6 +44,11 @@ BENCH_THREADS = (1, 2)
 BENCH_BATCH_SIZES = (1, 2, 4, 8)
 # The stages of DESIGN.md 7, in the order of its table: the robot's, the server's, the robot's.
 BREAKDOWN_STAGES = ("fire_lag", *STAGE_NAMES, "deliver")
+
+# The price of pacing (DESIGN.md 6.4): the control that turns pacing off, and its guard on
+# depth's rate per robot, whose median in each arm the ledger holds.
+PACING_CONTROL = "depth_unpaced"
+PACING_PRICE_PATH = "models.depth.all.commands_per_s_per_robot.mean"
 
 # Two robots have settled at equal shares from the first 1 s bin after which their counts
 # stay this close. A count is whole commands, so a difference of one command is counting;
@@ -104,7 +110,8 @@ class Source(StrEnum):
     USEFUL_ROBOTS = "useful_robots"  # across the scale points
     BATCH_PLAN = "batch_plan"  # from the model benchmark's table; the path names the result
     PREDICTION = "prediction"  # predictions.json, under the entry's key
-    LEDGER = "ledger"  # the candidate's line of the ledger; the path names the field
+    # The candidate's line of the ledger, after the path's first part, which names the candidate.
+    LEDGER = "ledger"
     ENVIRONMENT = "environment"  # the counted runs' env.json; the path names the field
 
 
@@ -544,6 +551,16 @@ def _worker_kill(prefix: str, topology: Topology) -> Iterator[FactKey]:
         ("fault", "outage_ms"),
         _MS,
     )
+    # How long after its planned time the kill landed, at the latest over the runs: the
+    # helper reads the worker's pid from /metrics once that time has come.
+    yield _entry(
+        f"{prefix}{scenario_key}.{fault.model}.kill_late_ms.max",
+        Source.SUMMARY,
+        scenario_key,
+        topology,
+        ("fault", "late_ms"),
+        _MS,
+    )
     for model in MODEL_KEYS:
         for window in _WINDOWS:
             yield from _metrics(
@@ -683,6 +700,12 @@ def _model_bench() -> Iterator[FactKey]:
         )
         yield summary(f"{model}.preprocess_ms", ("stages", f"preprocess_{model}_full", "wall_ms"))
         yield summary(f"{model}.postprocess_ms", ("stages", f"postprocess_{model}", "wall_ms"))
+    # The batched depth graph at the one size the published graph also takes. The published
+    # graph serves a cap of 1, which costs nothing while the batched one is no faster there
+    # (DESIGN.md 6.3, H6).
+    yield summary(
+        "depth.batched.t1.b1.wall_ms", ("tables", "depth", "t1", "batched", "1", "wall_ms")
+    )
     yield _entry(
         f"{MODEL_BENCH_KEY}.depth.margin_ms",
         Source.BATCH_PLAN,
@@ -734,6 +757,15 @@ def _ledger() -> Iterator[FactKey]:
                 (candidate.name, field),
                 unit,
             )
+    for arm in ARMS:
+        yield _entry(
+            f"ledger.{PACING_CONTROL}.depth_rate.{arm}_median",
+            Source.LEDGER,
+            None,
+            None,
+            (PACING_CONTROL, "metrics", PACING_PRICE_PATH, f"{arm}_median"),
+            metric_unit(PACING_PRICE_PATH),
+        )
 
 
 def _environment() -> Iterator[FactKey]:

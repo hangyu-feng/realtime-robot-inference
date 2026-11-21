@@ -18,12 +18,12 @@
     {
       "text": "1",
       "category": "brief",
-      "source": "1 robot in the steady demo, and the sweep's first robot count (the brief's Demonstration; DESIGN.md 2, 9.1, 9.3, 11.2, 11.4, bench/scenarios.py steady, SWEEP_ROBOT_COUNTS in bench/runplan.py); the planned experiments at 1 robot, 2-thread depth, its classifier rate cap and waiting for the next frame, reuse this count (DESIGN.md 12)"
+      "source": "1 robot in the steady demo, and the sweep's first robot count (the brief's Demonstration; DESIGN.md 2, 6.3 H4, 6.5, 9.1, 9.3, 9.6, 11.2, 11.4, bench/scenarios.py steady, SWEEP_ROBOT_COUNTS in bench/runplan.py); the planned experiments at 1 robot, 2-thread depth, its classifier rate cap and waiting for the next frame, reuse this count (DESIGN.md 12)"
     },
     {
       "text": "1",
       "category": "design",
-      "source": "one gateway process with one event loop, one process and one inference thread per worker, one fleet process (DESIGN.md 1.2, 4.6; ModelConfig.threads in cloud/config.py); batch size 1 and batch cap 1, the smallest calibrated size (DESIGN.md 2, 4.6, 6.2, 10.7, 12; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the published MiDaS graph's batch dimension fixed at 1 (DESIGN.md 4.6); OPENBLAS_NUM_THREADS=1 and OMP_NUM_THREADS=1 (DESIGN.md 4.6, Dockerfile); a robot speed of 1 m/s for the depth displacement budget (DESIGN.md 5.2, common/thresholds.py); 1 s bins for settle and recovery (DESIGN.md 9.2, 9.4, SERIES_BIN_S in bench/summarize.py, the unit of those keys in bench/facts.py); 1 ms bins for the freshness and age curves (DESIGN.md 11.3, CURVE_BIN_MS in bench/summarize.py); frames_pending 1 (DESIGN.md 10.3); the absolute floor of throttled time, 1 ms per s (DESIGN.md 12, THROTTLED_FLOOR_MS_PER_S in bench/candidates.py); top-1 agreement as a guard (DESIGN.md 12); the event loop's timer resolution, 1 ms (DESIGN.md 10.7, 13; whole milliseconds, as _MIN_WAIT_NS in cloud/config.py states)"
+      "source": "one gateway process with one event loop, one process and one inference thread per worker, one fleet process (DESIGN.md 1.2, 4.6; ModelConfig.threads in cloud/config.py); batch size 1 and batch cap 1, the smallest calibrated size, which the cls_cap_1 candidate forces (DESIGN.md 2, 4.6, 6.2, 6.3 H3, 6.5, 10.7, 12; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the published MiDaS graph's batch dimension fixed at 1 (DESIGN.md 4.6); OPENBLAS_NUM_THREADS=1 and OMP_NUM_THREADS=1 (DESIGN.md 4.6, Dockerfile); a robot speed of 1 m/s for the depth displacement budget (DESIGN.md 5.2, common/thresholds.py); 1 s bins for settle and recovery (DESIGN.md 9.2, 9.4, SERIES_BIN_S in bench/summarize.py, the unit of those keys in bench/facts.py); 1 ms bins for the freshness and age curves (DESIGN.md 11.3, CURVE_BIN_MS in bench/summarize.py); frames_pending 1 (DESIGN.md 10.3); the absolute floor of throttled time, 1 ms per s (DESIGN.md 12, THROTTLED_FLOOR_MS_PER_S in bench/candidates.py); top-1 agreement as a guard (DESIGN.md 12); the event loop's timer resolution, 1 ms (DESIGN.md 9.1, 10.7, 13; whole milliseconds, as _MIN_WAIT_NS in cloud/config.py states)"
     },
     {
       "text": "1",
@@ -38,17 +38,17 @@
     {
       "text": "1",
       "category": "derived",
-      "source": "utilization 1, where demand equals capacity (DESIGN.md 2, 6.3, 6.5); the coefficients of the formulas of DESIGN.md 6.3: 1 - min(1, ...), ceil(N / b_m) + 1, P x (1 - Q / D); the bucket edge 0.01 x 2^((i+1)/8) (DESIGN.md 10.1); the cls watchdog limit, 1 s = 2 x the 500 ms stale threshold (DESIGN.md 5.2, DEFAULT_WATCHDOG_MS in common/thresholds.py)"
+      "source": "utilization 1, where demand equals capacity (DESIGN.md 2, 6.3, 6.5, 9.3); the coefficients of the formulas of DESIGN.md 6.3: 1 - min(1, ...), ceil(N / b_m) + 1, P x (1 - Q / D); the bucket edge 0.01 x 2^((i+1)/8) (DESIGN.md 10.1); the cls watchdog limit, 1 s = 2 x the 500 ms stale threshold (DESIGN.md 5.2, DEFAULT_WATCHDOG_MS in common/thresholds.py)"
     },
     {
       "text": "2",
       "category": "brief",
-      "source": "the CPU limit, 2 CPU cores (the brief's Runtime Constraints; A15, A19; DESIGN.md 1.1, 1.2, 1.3, 3, 4.1, 6.3 Q, 6.4, 9.3, 9.5, 9.6, 15; EXPECTED_LIMITS in bench/gates.py, cpus in docker-compose.yml; README); the late joiner's 2 robots, A and B (the brief's Demonstration; DESIGN.md 11.2, bench/scenarios.py late_joiner)"
+      "source": "the CPU limit, 2 CPU cores (the brief's Runtime Constraints; A15, A19; DESIGN.md 1.1, 1.2, 1.3, 3, 4.1, 4.6, 6.3 Q, 6.4, 7, 9.3, 9.5, 9.6, 15; EXPECTED_LIMITS in bench/gates.py, cpus in docker-compose.yml; README); the late joiner's 2 robots, A and B (the brief's Demonstration; DESIGN.md 11.2, bench/scenarios.py late_joiner)"
     },
     {
       "text": "2",
       "category": "design",
-      "source": "2 inference threads in the thread experiments and the model benchmark (DESIGN.md 1.2, 6.2, 6.3 H8, 6.5; DESIGN.md 12, the planned 2-thread depth experiment with models.depth.threads set to 2, and its classifier rate cap; BENCH_THREADS in bench/facts.py), and option (b) of DESIGN.md 4.6, one executor with 2 threads; batch size 2 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py) and the depth_cap_2 candidate's cap 2 (DESIGN.md 12, bench/candidates.py); the robots container's memory limit, 2 GB (DESIGN.md 9.6, README; mem_limit of robots in docker-compose.split.yml); the 2 robots of worker_kill (DESIGN.md 11.2, bench/scenarios.py worker_kill)"
+      "source": "2 inference threads in the thread experiments and the model benchmark (DESIGN.md 6.2, 6.3 H8, 6.5, 7; DESIGN.md 12, the planned 2-thread depth experiment with models.depth.threads set to 2, and its classifier rate cap; BENCH_THREADS in bench/facts.py), and option (b) of DESIGN.md 4.6, one executor with 2 threads; batch size 2 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py) and the depth_cap_2 candidate's cap 2 (DESIGN.md 2, 6.2, 6.3 H3, 12, bench/candidates.py); the robots container's memory limit, 2 GB (DESIGN.md 9.6, README; mem_limit of robots in docker-compose.split.yml); the 2 robots of worker_kill (DESIGN.md 11.2, bench/scenarios.py worker_kill)"
     },
     {
       "text": "2",
@@ -63,7 +63,7 @@
     {
       "text": "3",
       "category": "brief",
-      "source": "3 robots in the disconnect demo and the sweep's second robot count (the brief's Demonstration; DESIGN.md 2, 6.5, 9.3, 9.4, 11.2, 11.4; bench/scenarios.py disconnect, SWEEP_ROBOT_COUNTS in bench/runplan.py); the brief's \"at least 3 concurrent robots\", which the robot-fleet examples of DESIGN.md 15 and the README use; the planned 2-thread depth experiment and its classifier rate cap at 3 robots (DESIGN.md 12)"
+      "source": "3 robots in the disconnect demo and the sweep's second robot count (the brief's Demonstration; DESIGN.md 2, 6.2, 6.3 H4, 6.5, 9.3, 9.4, 11.2, 11.4; bench/scenarios.py disconnect, SWEEP_ROBOT_COUNTS in bench/runplan.py); the brief's \"at least 3 concurrent robots\", which the robot-fleet examples of DESIGN.md 15 and the README use; the planned 2-thread depth experiment and its classifier rate cap at 3 robots (DESIGN.md 12)"
     },
     {
       "text": "3.14",
@@ -78,17 +78,17 @@
     {
       "text": "4",
       "category": "design",
-      "source": "batch size 4 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the depth_cap_4 candidate's cap 4 (DESIGN.md 12, bench/candidates.py); the relative threshold of a comparison, 4% of the A median (DESIGN.md 12, MIN_EFFECT_SHARE in bench/candidates.py)"
+      "source": "batch size 4 (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py) and the depth_cap_4 candidate's cap 4 (DESIGN.md 2, 6.2, 6.3 H3, 12, bench/candidates.py); the relative threshold of a comparison, 4% of the A median (DESIGN.md 12, MIN_EFFECT_SHARE in bench/candidates.py)"
     },
     {
       "text": "5",
       "category": "brief",
-      "source": "5 robots for the latency breakdown and the sweep's third robot count (the brief's Design Document and Demonstration; DESIGN.md contents, 2, 6.5, 7, 9.3, 11.2, 11.4; SWEEP_ROBOT_COUNTS in bench/runplan.py); the planned 2-thread depth experiment and its classifier rate cap at 5 robots (DESIGN.md 12)"
+      "source": "5 robots for the latency breakdown and the sweep's third robot count (the brief's Design Document and Demonstration; DESIGN.md contents, 2, 4.6, 6.2, 6.3 H4, 6.5, 7, 9.3, 11.2, 11.4, 12; SWEEP_ROBOT_COUNTS in bench/runplan.py); the planned 2-thread depth experiment and its classifier rate cap at 5 robots (DESIGN.md 12)"
     },
     {
       "text": "5",
       "category": "assumption",
-      "source": "A13: the memory leak is judged over a 5-minute soak (DESIGN.md 2, 3, 9.5, 11.2; bench/scenarios.py soak, 300 s)"
+      "source": "A13: the memory leak is judged over a 5-minute soak (DESIGN.md 2, 3, 8.2, 9.5, 11.2, 13; bench/scenarios.py soak, 300 s)"
     },
     {
       "text": "5.19",
@@ -98,7 +98,7 @@
     {
       "text": "8",
       "category": "design",
-      "source": "8 buckets per octave in the time histograms (DESIGN.md 10.1, BUCKETS_PER_OCTAVE in common/histogram.py); batch size 8, the largest calibrated size (DESIGN.md 6.2, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py)"
+      "source": "8 buckets per octave in the time histograms (DESIGN.md 10.1, BUCKETS_PER_OCTAVE in common/histogram.py); batch size 8, the largest calibrated size (DESIGN.md 6.2, 6.3 H3, 11.4; ModelConfig.batch_sizes in cloud/config.py, BENCH_BATCH_SIZES in bench/facts.py)"
     },
     {
       "text": "9",
@@ -108,7 +108,7 @@
     {
       "text": "10",
       "category": "brief",
-      "source": "the late joiner's 10 s alone before B joins (the brief's Demonstration; DESIGN.md 2, 9.2, 11.2; bench/scenarios.py late_joiner); 10 robots, the sweep's largest count (the brief's Demonstration; DESIGN.md 2, 6.5, 9.3, 11.2, 11.4; SWEEP_ROBOT_COUNTS in bench/runplan.py)"
+      "source": "the late joiner's 10 s alone before B joins (the brief's Demonstration; DESIGN.md 2, 9.2, 11.2; bench/scenarios.py late_joiner); 10 robots, the sweep's largest count (the brief's Demonstration; DESIGN.md 2, 6.3 H2 and H4, 6.5, 9.3, 9.6, 11.2, 11.4; SWEEP_ROBOT_COUNTS in bench/runplan.py)"
     },
     {
       "text": "10",
@@ -133,7 +133,7 @@
     {
       "text": "30",
       "category": "brief",
-      "source": "30 fps per robot (the brief's Problem Statement and Demonstration; DESIGN.md 1.1, 1.2, 2, 3, 4.1, 4.3, 5.1, 6.3 f and H1, H2, 6.5, 9.1, 9.5, 11.2, 13, 14; frame_rate_hz in cloud/config.py and robot/settings.py; README); 30 s for the steady, sweep and massive demos (the brief's Demonstration; DESIGN.md 2, 9.1, 9.3, 9.5, 11.2, 15; bench/scenarios.py), which the robot-fleet examples run for too (DESIGN.md 15, README; the banner in cloud/main.py, the robots command of docker-compose.split.yml)"
+      "source": "30 fps per robot (the brief's Problem Statement and Demonstration; DESIGN.md 1.1, 1.2, 2, 3, 4.1, 4.3, 5.1, 6.3 f and H1, H2, 6.5, 9.1, 9.5, 11.2, 14; frame_rate_hz in cloud/config.py and robot/settings.py; README); 30 s for the steady, sweep and massive demos (the brief's Demonstration; DESIGN.md 2, 8.2, 9.1, 9.3, 9.5, 11.2, 15; bench/scenarios.py), which the robot-fleet examples run for too (DESIGN.md 15, README; the banner in cloud/main.py, the robots command of docker-compose.split.yml)"
     },
     {
       "text": "30",
@@ -153,7 +153,7 @@
     {
       "text": "50",
       "category": "brief",
-      "source": "50 concurrent robots (the brief's Demonstration, Massive connections, and its Design Document's \"at 50 robots\"; DESIGN.md contents and 2, 3, 4, 5.1, 6.3 H7, 6.5, 8, 9.5, 9.6, 11.2, 11.5, 12 (the planned half-size decode and server-advised frame rate experiments), 13 (the co-located simulator and the freezes that pacing cannot remove); bench/scenarios.py massive and soak, the WebSocket benchmark of the model_bench scenario)"
+      "source": "50 concurrent robots (the brief's Demonstration, Massive connections, and its Design Document's \"at 50 robots\"; DESIGN.md contents and 2, 3, 4, 5.1, 5.2, 5.6, 6.2, 6.3 H4 and H7, 6.4, 6.5, 7, 8, 9.5, 9.6, 11.2, 11.5, 12 (the planned half-size decode and server-advised frame rate experiments), 13 (the co-located simulator and the freezes that pacing cannot remove); bench/scenarios.py massive and soak, the WebSocket benchmark of the model_bench scenario)"
     },
     {
       "text": "60",

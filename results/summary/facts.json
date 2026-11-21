@@ -1202,6 +1202,66 @@
       "unit": "ms/s",
       "value": 36.38463433818253
     },
+    "ledger.depth_unpaced.depth_rate.a_median": {
+      "attempts": 4,
+      "dirty_runs": 0,
+      "failed_attempts": 0,
+      "failed_checks": {
+        "single-3d64a8ebf64b-60d80142-r1": [
+          "simulator_valid"
+        ],
+        "single-3d64a8ebf64b-60d80142-r2": [
+          "simulator_valid"
+        ],
+        "single-8987df77125d-60d80142-r1": [
+          "simulator_valid"
+        ],
+        "single-8987df77125d-60d80142-r2": [
+          "simulator_valid"
+        ]
+      },
+      "max": null,
+      "min": null,
+      "run_ids": [
+        "single-3d64a8ebf64b-60d80142-r1",
+        "single-3d64a8ebf64b-60d80142-r2",
+        "single-8987df77125d-60d80142-r1",
+        "single-8987df77125d-60d80142-r2"
+      ],
+      "runs": 2,
+      "unit": "commands/s",
+      "value": 0.10800000000000001
+    },
+    "ledger.depth_unpaced.depth_rate.b_median": {
+      "attempts": 4,
+      "dirty_runs": 0,
+      "failed_attempts": 0,
+      "failed_checks": {
+        "single-3d64a8ebf64b-60d80142-r1": [
+          "simulator_valid"
+        ],
+        "single-3d64a8ebf64b-60d80142-r2": [
+          "simulator_valid"
+        ],
+        "single-8987df77125d-60d80142-r1": [
+          "simulator_valid"
+        ],
+        "single-8987df77125d-60d80142-r2": [
+          "simulator_valid"
+        ]
+      },
+      "max": null,
+      "min": null,
+      "run_ids": [
+        "single-3d64a8ebf64b-60d80142-r1",
+        "single-3d64a8ebf64b-60d80142-r2",
+        "single-8987df77125d-60d80142-r1",
+        "single-8987df77125d-60d80142-r2"
+      ],
+      "runs": 2,
+      "unit": "commands/s",
+      "value": 0.1766666666666667
+    },
     "ledger.depth_unpaced.main_delta": {
       "attempts": 4,
       "dirty_runs": 0,
@@ -3218,6 +3278,22 @@
       "runs": 3,
       "unit": "frames",
       "value": 1
+    },
+    "model_bench.depth.batched.t1.b1.wall_ms": {
+      "attempts": 3,
+      "dirty_runs": 0,
+      "failed_attempts": 0,
+      "failed_checks": {},
+      "max": 94.0977347,
+      "min": 85.32808756666667,
+      "run_ids": [
+        "single-dfc16b1cc32a-60d80142-r1",
+        "single-dfc16b1cc32a-60d80142-r2",
+        "single-dfc16b1cc32a-60d80142-r3"
+      ],
+      "runs": 3,
+      "unit": "ms",
+      "value": 92.11868830000002
     },
     "model_bench.depth.margin_ms": {
       "attempts": 3,
@@ -8591,6 +8667,22 @@
       "unit": "commands/s",
       "value": 5.275
     },
+    "split.worker_kill.depth.kill_late_ms.max": {
+      "attempts": 3,
+      "dirty_runs": 0,
+      "failed_attempts": 0,
+      "failed_checks": {},
+      "max": 24.380333999999948,
+      "min": 17.26600399999967,
+      "run_ids": [
+        "split-91c1ecb3ba79-60d80142-r1",
+        "split-91c1ecb3ba79-60d80142-r2",
+        "split-91c1ecb3ba79-60d80142-r3"
+      ],
+      "runs": 3,
+      "unit": "ms",
+      "value": 24.380333999999948
+    },
     "split.worker_kill.depth.outage_ms": {
       "attempts": 3,
       "dirty_runs": 0,
@@ -11353,6 +11445,22 @@
       "runs": 3,
       "unit": "commands/s",
       "value": 5.3
+    },
+    "worker_kill.depth.kill_late_ms.max": {
+      "attempts": 3,
+      "dirty_runs": 0,
+      "failed_attempts": 0,
+      "failed_checks": {},
+      "max": 23.8708299999999,
+      "min": 22.207282000000106,
+      "run_ids": [
+        "single-25d66104bf28-60d80142-r1",
+        "single-25d66104bf28-60d80142-r2",
+        "single-25d66104bf28-60d80142-r3"
+      ],
+      "runs": 3,
+      "unit": "ms",
+      "value": 23.8708299999999
     },
     "worker_kill.depth.outage_ms": {
       "attempts": 3,

@@ -915,8 +915,12 @@ def _prediction_fact(entry: FactKey, inputs: _Inputs) -> Fact:
 
 
 def _ledger_fact(entry: FactKey, inputs: _Inputs) -> Fact:
-    candidate, field = entry.path
-    value = inputs.ledger[candidate][field]
+    candidate, *fields = entry.path
+    # A candidate that was not run has no metrics, so a path into them leaves its line.
+    value = lookup(inputs.ledger[candidate], fields)
+    if isinstance(value, bool) or not isinstance(value, int | float | str | None):
+        where = ".".join(entry.path)
+        raise AggregateError(f"{LEDGER_FILE}: {where} must be a number, a string or null")
     return _fact(entry, value, _behind(inputs, _groups(entry, inputs)))
 
 
