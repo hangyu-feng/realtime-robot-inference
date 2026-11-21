@@ -15,10 +15,12 @@ A real-time inference service for a fleet of robots. Simulated robots stream 640
 ```sh
 docker compose build            # the image; downloads both models and verifies their sha256
 docker compose up -d            # gateway and workers, limited to 2 CPUs and 4 GB, on port 8080
-docker compose logs -f system   # wait for the line that starts with "ready:", then Ctrl-C
+until curl -sf http://localhost:8080/healthz >/dev/null; do sleep 1; done   # wait until the service is ready
 ```
 
-The gateway loads and warms both models before it accepts robots. It prints `listening on HOST:PORT` once its socket is bound, then a banner whose first line starts with `ready:` and gives the port, each model's batch cap and the limits it read from the container's cgroup. Until then `/healthz` answers 503 and robot connections are refused.
+The service is ready a few seconds after `up`, once both workers have warmed up and calibrated their models. The wait above returns once `/healthz` answers 200. Do not wait by searching the logs for "ready:": each worker's log line also contains it, so a plain grep fires before the gateway is ready.
+
+The gateway loads and warms both models before it accepts robots. It prints `listening on HOST:PORT` once its socket is bound, then a banner whose first line starts with `ready:` and gives the port, each model's batch cap and the limits it read from the container's cgroup. `docker compose logs system` shows it. Until then `/healthz` answers 503 and robot connections are refused.
 
 Stream robots at it from inside the container:
 
@@ -26,14 +28,18 @@ Stream robots at it from inside the container:
 docker compose exec system python -m robot.fleet --robots 3 --duration-s 30
 ```
 
-Each robot sends frames at 30 fps, rejects stale or out-of-order commands, and reports its telemetry to the gateway. `python -m robot.fleet --help` lists the other options (frame rate, models, stale thresholds, link delay, `--samples-dir` for per-command samples).
+Each robot sends frames at 30 fps, rejects stale or out-of-order commands, and reports its telemetry to the gateway. The fleet prints counts only: when a session ends, each robot logs, per model, how many commands it received, applied, rejected as stale and rejected as out of order. Per-robot freshness comes from a hand run with `bench.run`, described in [Running a demo by hand](#running-a-demo-by-hand), or from `/metrics`. `python -m robot.fleet --help` lists the other options (frame rate, models, stale thresholds, link delay, `--samples-dir` for per-command samples).
 
 Read the service's state, during a run or after it:
 
 ```sh
-curl -s http://localhost:8080/metrics   # one JSON object; the Metrics contract section of DESIGN.md defines every field
+curl -s http://localhost:8080/metrics   # one JSON object; docs/metrics.md defines every field
 curl -i http://localhost:8080/healthz   # 200 while robots are accepted and both workers are ready, 503 otherwise
 ```
+
+Under a histogram, the keys of `buckets` are bucket indexes, not milliseconds: each index stands for a fixed range of durations on a log scale, and the conventions of [docs/metrics.md](docs/metrics.md) give the formula that turns an index into its range.
+
+`config.version` in `/metrics` is the commit the image was built from. It reads "unknown" unless the image is built with the `GIT_COMMIT` build argument, which the compose files take from the environment: for a hand build, run `GIT_COMMIT=$(git rev-parse HEAD) docker compose build`. The evidence runner sets it itself.
 
 Stop it:
 
@@ -53,7 +59,7 @@ RRI_OVERRIDES='{"queue_policy": "fifo", "skip_rule": false}' docker compose up -
 
 ```sh
 docker compose -f docker-compose.split.yml up -d
-docker compose -f docker-compose.split.yml logs -f system   # wait for "ready:"
+until curl -sf http://localhost:8080/healthz >/dev/null; do sleep 1; done
 docker compose -f docker-compose.split.yml run --rm robots python -m robot.fleet --url ws://system:8080/ws --robots 3 --duration-s 30
 docker compose -f docker-compose.split.yml down
 ```
@@ -62,7 +68,7 @@ From the robots' container the gateway is `system:8080`, not localhost. Both con
 
 ## Running a demo by hand
 
-The scenario driver, `bench.run`, plays one scenario against a running service, scrapes `/metrics` every second, and at the end prints each robot's results. Start the service as in the quick start, wait for `ready:`, then:
+The scenario driver, `bench.run`, plays one scenario against a running service, scrapes `/metrics` every second, and at the end prints each robot's results. Start the service as in the quick start, wait until `/healthz` answers 200, then:
 
 ```sh
 docker compose exec system python -m bench.run --run-dir /tmp/steady --scenario steady
@@ -102,9 +108,11 @@ make test-docker                                           # on the host: the ev
 
 Tests that need the model files skip outside the image. Tests that need the host's docker CLI are marked `docker`: `make check` leaves them out and `make test-docker` runs them.
 
+The service's startup banner suggests `docker compose run --rm system pytest -q tests/integration`. That command runs only the integration tests in the image: the service on real sockets, with the real models. The second command above runs the whole suite in the image, the unit, property and model tests as well, so it includes the banner's tests. Neither runs the tests marked `docker`: the second command leaves them out, and the banner's command skips them because the image has no docker CLI.
+
 ## How the numbers are produced
 
-Every measured value in DESIGN.md comes from a file under `results/` written by a gated run. The design document is rendered from `docs/DESIGN.tmpl.md`, where each measured value is a placeholder filled from `results/summary/facts.json`, and every other number is a literal declared in `docs/constants.json` with its category and source. This README is rendered from `docs/README.tmpl.md` the same way, so edit the templates, not the rendered files.
+Every measured value in DESIGN.md comes from a file under `results/` written by a gated run. The design document is rendered from `docs/DESIGN.tmpl.md`, where each measured value is a placeholder filled from `results/summary/facts.json`, and every other number is a literal declared in `docs/constants.json` with its category and source. This README is rendered from `docs/README.tmpl.md` the same way, so edit the templates, not the rendered files. To go from a number in DESIGN.md to its table: each demo's table, with the lowest and highest value of its counted runs, is in `results/tables/`, in a file named after its scenario, such as `steady.md` or `sweep.md`, and the plots are in `results/plots/`.
 
 The pipeline runs on the host:
 
@@ -119,7 +127,7 @@ RRI_RESULTS=/absolute/path make evidence   # a results root elsewhere; the make 
 
 `REPEATS` sets how many times the plan runs, and `MODELS` picks the model set: `real`, or `fake` and `null`, which exercise the pipeline without the real models. A run counts only when it passes five gates: the test suite passed in the run's image with nothing skipped, the image was built in the same invocation, the container reports the 2-CPU and 4 GB limits and no swap, the run started in fresh containers, and the configuration the gateway reports is the one planned. An interrupted or failed run is kept as an attempt and never used.
 
-The number check fails when a rendered document is out of date with its template and the facts, when the facts, tables or ledger differ from what the results produce now, or when a template holds a number that is neither a placeholder nor a declared literal. The Run-output contract section of DESIGN.md describes the results layout, the scenarios, the files of a run and the fact keys; its Reproduction section lists the commands.
+The number check fails when a rendered document is out of date with its template and the facts, when the facts, tables or ledger differ from what the results produce now, or when a template holds a number that is neither a placeholder nor a declared literal. [docs/run-output.md](docs/run-output.md) describes the results layout, the scenarios, the files of a run and the fact keys. The Reproduction section of DESIGN.md lists the commands.
 
 ## Model files
 
