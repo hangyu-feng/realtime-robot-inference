@@ -345,6 +345,52 @@ def test_a_run_of_another_spec_of_other_code_a_comparison_and_a_hand_run_enter_n
             0,
             2,
         ),
+        # A statistic added after a per-run value takes that extreme of the runs.
+        (
+            "massive.depth.stale_ratio.max",
+            "massive",
+            "models.depth.all.stale_ratio",
+            [0.006, 0.104, 0.007],
+            0.104,
+            0.006,
+            0.104,
+        ),
+        (
+            "massive.cls.commands_per_s_per_robot.mean.min",
+            "massive",
+            "models.cls.all.commands_per_s_per_robot.mean",
+            [5.7, 4.9, 5.9],
+            4.9,
+            4.9,
+            5.9,
+        ),
+        (
+            "massive.cpu.throttled_share",
+            "massive",
+            "cpu.all.throttled_share",
+            [0.48, 0.35, 0.34],
+            0.35,
+            0.34,
+            0.48,
+        ),
+        (
+            "sweep.n10.depth.watchdog_coverage.mean",
+            "sweep_n10",
+            "models.depth.all.watchdog_coverage.mean",
+            [0.16, 0.17, 0.161],
+            0.161,
+            0.16,
+            0.17,
+        ),
+        (
+            "sweep.n10.worker_cls.cpu_cores",
+            "sweep_n10",
+            "cpu.all.cores.worker_cls",
+            [0.971, 0.974, 0.969],
+            0.971,
+            0.969,
+            0.974,
+        ),
     ],
 )
 def test_a_fact_combines_the_values_of_its_counted_runs_by_its_rule(
@@ -390,6 +436,49 @@ def test_the_gap_bound_is_the_bound_of_the_run_with_the_longest_gap(tmp_path: Pa
     bound = facts["massive.depth.command_gap_bound_ms"]
     assert (facts["massive.depth.command_gap_ms.max"].value, bound.value) == (10686.0, 10914.0)
     assert (bound.min, bound.max, bound.runs) == (9599.0, 10914.0, 3)
+
+
+def test_the_cycles_of_the_gap_bound_are_those_of_the_run_with_the_longest_gap(
+    tmp_path: Path,
+) -> None:
+    for repeat, (gap_ms, cycle_ms) in enumerate(((10686.0, 213.0), (9396.0, 188.0)), start=1):
+        summary = gap_summary(gap_ms, gap_ms + 200.0)
+        summary["checks"][0]["observed"] |= {"cycle_ms": cycle_ms, "calibrated_cycle_ms": 181.0}
+        write_given(tmp_path, plan_spec("massive", repeat=repeat), summary)
+
+    facts = built(tmp_path)
+
+    assert facts["massive.depth.command_gap_cycle_ms"].value == 213.0
+    assert facts["massive.depth.command_gap_calibrated_cycle_ms"].value == 181.0
+
+
+def rates_summary(model: str, rates: tuple[float, float, float]) -> dict[str, Any]:
+    """Return a summary whose robots' rates of a model have this min, mean and max."""
+    path = f"models.{model}.all.commands_per_s_per_robot"
+    names = (f"{path}.{name}" for name in ("min", "mean", "max"))
+    return nested(dict(zip(names, rates, strict=True)))
+
+
+def test_the_median_run_rates_are_the_lowest_mean_and_highest_robot_of_one_run(
+    tmp_path: Path,
+) -> None:
+    # The lowest robot of all is in the first run and the highest in the second; the third
+    # run's mean is the median.
+    for repeat, rates in enumerate(((4.90, 4.91, 4.93), (5.90, 5.92, 5.93), (5.63, 5.66, 5.67)), 1):
+        write_given(tmp_path, plan_spec("massive", repeat=repeat), rates_summary("cls", rates))
+
+    facts = built(tmp_path)
+
+    prefix = "massive.cls.median_run.commands_per_s_per_robot"
+    assert [facts[f"{prefix}.{name}"].value for name in ("min", "mean", "max")] == [
+        5.63,
+        5.66,
+        5.67,
+    ]
+    lowest = facts[f"{prefix}.min"]
+    assert (lowest.min, lowest.max, lowest.runs) == (4.90, 5.90, 3)
+    assert facts["massive.cls.commands_per_s_per_robot.min"].value == 4.90
+    assert facts["massive.cls.commands_per_s_per_robot.mean.min"].value == 4.91
 
 
 @pytest.mark.parametrize(
@@ -704,10 +793,12 @@ def test_one_counted_run_of_the_code_is_enough_to_write(tmp_path: Path) -> None:
 
 
 def scale_summary(model: str, utilization: float | None, peak_age_ms: float) -> dict[str, Any]:
+    """Return a scale point's summary: a capacity of 600 frames/s, of which 570 are served."""
     return nested(
         {
             f"models.{model}.all.utilization": utilization,
             f"models.{model}.all.capacity_fps": None if utilization is None else 600.0,
+            f"models.{model}.all.commands_per_s": None if utilization is None else 570.0,
             f"models.{model}.all.command_age_peak_ms.p95": peak_age_ms,
         }
     )
@@ -735,6 +826,8 @@ def test_the_inflection_and_the_useful_robots_are_read_off_the_medians_of_the_sc
     assert facts["sweep.cls.capacity_fps"].value == 600.0
     assert facts["sweep.cls.inflection_n"].value == 600.0 / ServerConfig().frame_rate_hz
     assert facts["sweep.cls.inflection_between"].value == "between 5 and 10 robots"
+    # What it served at that point, over the frame rate.
+    assert facts["sweep.cls.served_inflection_n"].value == 570.0 / ServerConfig().frame_rate_hz
     # The median peak age at 10 robots, 1200 ms, is above the limit: 5 is the largest within.
     assert (facts["massive.cls.useful_robots"].value, facts["massive.cls.useful_robots"].unit) == (
         5,
@@ -787,7 +880,8 @@ def test_a_scale_point_without_a_counted_run_leaves_the_cross_run_keys_null(
 
 
 CLS_INFLECTION_KEYS = tuple(
-    f"sweep.cls.{result}" for result in ("capacity_fps", "inflection_n", "inflection_between")
+    f"sweep.cls.{result}"
+    for result in ("capacity_fps", "inflection_n", "inflection_between", "served_inflection_n")
 )
 
 
@@ -895,6 +989,25 @@ def test_the_settle_time_is_counted_in_whole_seconds_from_the_join(tmp_path: Pat
     assert facts["late_joiner.cls.settle_s"].value is None
 
 
+def test_the_slowest_settle_is_the_largest_settle_time_of_the_runs(tmp_path: Path) -> None:
+    # The first run settles in its fourth second after the join, the other two in the first.
+    caught_up = [30] * 10 + [15] * 20
+    late = bins_summary(
+        {"a": [30] * 10 + [30, 25, 20, 15] + [15] * 16, "b": [0] * 10 + [0, 5, 10] + [15] * 17}
+    )
+    level = bins_summary({"a": caught_up, "b": [0] * 10 + [15] * 20})
+    for repeat, summary in enumerate((late, level, level), start=1):
+        spec = plan_spec("late_joiner", repeat=repeat)
+        write_given(tmp_path, spec, summary, scenario=late_joiner())
+
+    facts = built(tmp_path)
+
+    assert (
+        facts["late_joiner.depth.settle_s"].value,
+        facts["late_joiner.depth.settle_s.max"].value,
+    ) == (1, 4)
+
+
 @pytest.mark.parametrize(
     "per_robot",
     [
@@ -954,7 +1067,14 @@ def test_every_summary_path_of_the_registry_is_a_number_the_summarizer_writes(
     read = {
         key: entry.path
         for key, entry in REGISTRY.items()
-        if entry.source in (Source.SUMMARY, Source.BREAKDOWN, Source.GAP_BOUND)
+        if entry.source
+        in (
+            Source.SUMMARY,
+            Source.BREAKDOWN,
+            Source.MEDIAN_RUN,
+            Source.GAP_BOUND,
+            Source.LOOP_ROBOTS,
+        )
         and (entry.scenario_key, entry.topology) == (scenario_key, Topology.SINGLE)
     }
 
@@ -1200,6 +1320,31 @@ def test_the_predictions_are_made_for_a_quota_of_2_cores_with_seed_0_for_1_to_50
     assert written == json.loads(json.dumps(expected))
 
 
+def test_a_curve_point_is_the_predicted_curve_at_the_robot_count_of_its_measured_key(
+    bench_root: Path,
+) -> None:
+    curves = json.loads((bench_root / SUMMARY_DIRECTORY / PREDICTIONS_FILE).read_bytes())["curves"]
+    facts = read_facts(bench_root).facts
+    at = {count: index for index, count in enumerate(curves["robots"])}
+
+    assert {
+        key: facts[key].value
+        for key in (
+            "predict.sweep.n10.cls.freshness_ms.p95",
+            "predict.sweep.n3.depth.batch_size.mean",
+            "predict.massive.depth.command_gap_bound_ms",
+        )
+    } == {
+        "predict.sweep.n10.cls.freshness_ms.p95": curves["cls"]["freshness_ms_p95"][at[10]],
+        "predict.sweep.n3.depth.batch_size.mean": curves["depth"]["batch_size_mean"][at[3]],
+        "predict.massive.depth.command_gap_bound_ms": (
+            curves["depth"]["command_gap_bound_ms"][at[50]]
+        ),
+    }
+    point = facts["predict.massive.cls.freshness_ms.p50"]
+    assert (point.unit, point.runs, point.min, point.max) == ("ms", 2, None, None)
+
+
 def lookup_object(document: object, key: str) -> Mapping[str, Any]:
     value = lookup(document, (key,))
     assert isinstance(value, dict)
@@ -1339,6 +1484,52 @@ def test_the_price_of_pacing_is_the_median_depth_rate_of_each_arm_of_its_control
     assert paced.value == pytest.approx(0.105)
     assert unpaced.value == pytest.approx(0.175)
     assert (paced.unit, paced.runs, len(unpaced.run_ids)) == ("commands/s", 2, 4)
+
+
+def test_a_comparison_fact_is_the_median_of_one_arm_and_feeds_no_demo_fact(
+    tmp_path: Path,
+) -> None:
+    control = next(candidate for candidate in CANDIDATES if candidate.name == "depth_unpaced")
+    others = dict.fromkeys((control.main.path, *(guard.path for guard in control.guards)), 1.0)
+    rate = "models.cls.all.commands_per_s_per_robot.mean"
+    # The plan runs the arms A, B, B, A; the classifier's rate is not one of the metrics.
+    for spec, cls_rate in zip(
+        compare_plan(control, runs.CODE_DIGEST), [5.86, 4.76, 4.84, 5.56], strict=True
+    ):
+        write_given(tmp_path, spec, nested({**others, rate: cls_rate}))
+    write_given(tmp_path, plan_spec("massive"), nested({rate: 5.66}))
+
+    facts = built(tmp_path)
+
+    paced = facts["compare.depth_unpaced.a.cls.commands_per_s_per_robot.mean"]
+    unpaced = facts["compare.depth_unpaced.b.cls.commands_per_s_per_robot.mean"]
+    assert [paced.value, unpaced.value] == pytest.approx([5.71, 4.80])
+    assert (paced.min, paced.max, paced.runs, len(paced.run_ids)) == (5.56, 5.86, 2, 2)
+    # A value the runs do not hold has no answer.
+    assert facts["compare.depth_unpaced.b.depth.stale_ratio"].value is None
+    assert facts["massive.cls.commands_per_s_per_robot.mean"].value == 5.66
+
+
+def test_the_loop_saturates_where_the_frames_cost_one_core_at_the_frame_rate(
+    tmp_path: Path,
+) -> None:
+    for repeat, cost_ms in enumerate((0.124, 0.120, 0.144), start=1):
+        summary = nested({"gateway.all.cpu_ms_per_frame": cost_ms})
+        write_given(tmp_path, plan_spec("massive", repeat=repeat), summary)
+
+    fact = built(tmp_path)["massive.gateway.loop_saturation_robots"]
+
+    frame_rate_hz = ServerConfig().frame_rate_hz
+    assert [fact.value, fact.min, fact.max] == pytest.approx(
+        [1000.0 / (frame_rate_hz * cost_ms) for cost_ms in (0.124, 0.144, 0.120)]
+    )
+
+
+def test_a_gateway_that_spent_no_cpu_per_frame_is_an_unreadable_input(tmp_path: Path) -> None:
+    write_given(tmp_path, plan_spec("massive"), nested({"gateway.all.cpu_ms_per_frame": 0.0}))
+
+    with pytest.raises(AggregateError, match=r"gateway\.all\.cpu_ms_per_frame"):
+        build(tmp_path, tmp_path, ModelSet.FAKE, CURRENT)
 
 
 def test_a_comparison_run_without_a_metric_is_an_unreadable_input(tmp_path: Path) -> None:

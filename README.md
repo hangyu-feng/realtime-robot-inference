@@ -92,10 +92,11 @@ robot <id> <model>: <n> commands, freshness ms p50 <ms> p95 <ms> p99 <ms> max <m
 
 Freshness is the receive time of a command minus the capture time of its frame, on the robot's clock. A robot that the scenario kills writes no samples and gets no line. A hand run is ungated and never counted: its `config.json` marks it as a hand run, and no number in DESIGN.md comes from one. The directory stays in the container; `docker compose cp system:/tmp/steady ./steady` copies it out.
 
-In the split topology the driver runs in the robots' container and reaches the gateway by name:
+In the split topology the driver runs in the robots' container and reaches the gateway by name. The run directory is in that container, so give it a name and leave out `--rm`, then copy the directory out and remove the container:
 
 ```sh
-docker compose -f docker-compose.split.yml run --rm robots python -m bench.run --run-dir /tmp/steady --scenario steady --url ws://system:8080/ws --metrics-url http://system:8080/metrics
+docker compose -f docker-compose.split.yml run --name rri-steady robots python -m bench.run --run-dir /tmp/steady --scenario steady --url ws://system:8080/ws --metrics-url http://system:8080/metrics
+docker cp rri-steady:/tmp/steady ./steady && docker rm rri-steady
 ```
 
 ## Tests

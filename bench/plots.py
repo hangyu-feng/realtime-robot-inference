@@ -861,8 +861,6 @@ _PLOTS: tuple[tuple[str, str, _Draw], ...] = (
         "Freshness under latest wins and under the FIFO control",
         _fifo_vs_latest,
     ),
-    # The delay sweep is a planned experiment with no scenario, so no run of it exists.
-    ("delay_sweep.png", "Freshness and stale ratio against one-way delay", lambda _, __: None),
 )
 
 

@@ -5,9 +5,9 @@ one entry per key: the scenario key and topology whose counted runs it reads, wh
 lies in a run's summary.json or which rule computes it, its unit, how the values of several
 runs combine, and whether it is a whole number. The rules that need more than one path of
 one summary are here as functions of plain values: the inflection point, the useful robot
-count, the settle and recovery times, and the runs a model's breakdown and its gap bound are
-taken from. The placeholder that names a key in a template is defined beside the keys.
-Nothing here reads a file.
+count, the settle and recovery times, and the runs a model's breakdown, its median-run rates
+and its gap bound are taken from. The placeholder that names a key in a template is defined
+beside the keys. Nothing here reads a file.
 """
 
 from __future__ import annotations
@@ -49,6 +49,27 @@ BREAKDOWN_STAGES = ("fire_lag", *STAGE_NAMES, "deliver")
 # depth's rate per robot, whose median in each arm the ledger holds.
 PACING_CONTROL = "depth_unpaced"
 PACING_PRICE_PATH = "models.depth.all.commands_per_s_per_robot.mean"
+# The values of comparison runs that DESIGN.md 6.4 and 12 read beside the ledger's metrics, as
+# (candidate, model, metric under models.<model>.all): what pacing costs the classifier and how
+# many of the depth commands it gains arrive stale, and depth's rate when ONNX Runtime picks
+# the thread counts.
+COMPARISON_METRICS: tuple[tuple[str, str, str], ...] = (
+    (PACING_CONTROL, "cls", "commands_per_s_per_robot.mean"),
+    (PACING_CONTROL, "cls", "freshness_ms.p99"),
+    (PACING_CONTROL, "depth", "applied_per_s_per_robot.mean"),
+    (PACING_CONTROL, "depth", "stale_ratio"),
+    ("ort_default_threads", "depth", "commands_per_s_per_robot.mean"),
+)
+# The metrics whose predicted curve is read at a measured robot count, and the curve of
+# predictions.json each is read from (DESIGN.md 6.3).
+CURVE_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "freshness_ms.p50": "freshness_ms_p50",
+        "freshness_ms.p95": "freshness_ms_p95",
+        "batch_size.mean": "batch_size_mean",
+        "command_gap_bound_ms": "command_gap_bound_ms",
+    }
+)
 
 # Two robots have settled at equal shares from the first 1 s bin after which their counts
 # stay this close. A count is whole commands, so a difference of one command is counting;
@@ -73,11 +94,13 @@ _UNITS: Mapping[str, str] = MappingProxyType(
         "freshness_ms": _MS,
         "freshness_trend_ms_per_s": "ms/s",
         "command_gap_ms": _MS,
+        "command_gap_bound_ms": _MS,
         "command_age_peak_ms": _MS,
         "first_gap_ms": _MS,
         "fire_lag_ms": _MS,
         "commands_per_s": _COMMAND_RATE,
         "commands_per_s_per_robot": _COMMAND_RATE,
+        "applied_per_s_per_robot": _COMMAND_RATE,
         "commands_received": _COMMANDS,
         "stale_count": _COMMANDS,
         "out_of_order_count": _COMMANDS,
@@ -89,6 +112,7 @@ _UNITS: Mapping[str, str] = MappingProxyType(
         "batch_size.share_1": _RATIO,
         "utilization": _RATIO,
         "throttled_ms_per_s": "ms/s",
+        "throttled_share": _RATIO,
     }
 )
 _STATISTICS = frozenset(("min", "mean", "max", "p50", "p95", "p99"))
@@ -101,6 +125,8 @@ class Source(StrEnum):
 
     SUMMARY = "summary"  # each counted run's summary.json, at the entry's path
     BREAKDOWN = "breakdown"  # the summary of the one run a model's breakdown is taken from
+    # The summary of the run whose mean rate per robot of the model is the median.
+    MEDIAN_RUN = "median_run"
     GAP_BOUND = "gap_bound"  # the summary of the run with the model's longest gap
     SETTLE = "settle"  # per run, from the two robots' commands in 1 s bins
     RECOVERY = "recovery"  # per run, from the survivors' commands in 1 s bins
@@ -108,10 +134,19 @@ class Source(StrEnum):
     DETECT = "detect"
     INFLECTION = "inflection"  # across the scale points; the path names the result
     USEFUL_ROBOTS = "useful_robots"  # across the scale points
+    # Per run, the robots whose frames would fill one core of the gateway's event loop at the
+    # CPU cost per frame at the entry's path.
+    LOOP_ROBOTS = "loop_robots"
     BATCH_PLAN = "batch_plan"  # from the model benchmark's table; the path names the result
     PREDICTION = "prediction"  # predictions.json, under the entry's key
+    # A curve of predictions.json at one robot count; the path names the model, the curve and
+    # the count.
+    CURVE = "curve"
     # The candidate's line of the ledger, after the path's first part, which names the candidate.
     LEDGER = "ledger"
+    # Each counted run of one arm of a comparison, at the path after its first two parts, which
+    # name the candidate and the arm.
+    COMPARISON = "comparison"
     ENVIRONMENT = "environment"  # the counted runs' env.json; the path names the field
 
 
@@ -199,18 +234,20 @@ def combined(values: Sequence[float], entry: FactKey) -> int | float:
     return stored(statistics.median(values), entry.integer)
 
 
-def breakdown_run(e2e_mean_ms: Mapping[str, float]) -> str:
-    """Return the run a model's breakdown is taken from, given each run's end-to-end mean.
+def median_run(values: Mapping[str, float]) -> str:
+    """Return the run whose value is the median, given each run's value.
 
-    It is the run whose mean is the median: the lower middle for an even count, and the
-    smaller run id where two runs share that mean. Medians taken stage by stage would come
-    from different runs, and the stage means would not add up to their sum.
+    The lower middle for an even count, and the smaller run id where two runs share that
+    value. A model's breakdown is taken from the run whose end-to-end mean is the median,
+    because medians taken stage by stage would come from different runs and the stage means
+    would not add up to their sum; its median-run rates likewise come from one run, so that
+    its lowest, mean and highest robot are of one run.
     """
-    if not e2e_mean_ms:
-        raise ValueError("no run to take the breakdown from")
-    ordered = sorted(e2e_mean_ms.values())
-    middle_ms = ordered[(len(ordered) - 1) // 2]
-    return min(run_id for run_id, mean_ms in e2e_mean_ms.items() if mean_ms == middle_ms)
+    if not values:
+        raise ValueError("no run to take the median run from")
+    ordered = sorted(values.values())
+    middle = ordered[(len(ordered) - 1) // 2]
+    return min(run_id for run_id, value in values.items() if value == middle)
 
 
 def gap_bound_run(gap_max_ms: Mapping[str, float]) -> str:
@@ -234,6 +271,8 @@ class ScalePoint:
     robot_count: int
     utilization: float | None
     capacity_fps: float | None
+    # The commands per second the model served over every robot.
+    served_fps: float | None
 
 
 @dataclass(frozen=True)
@@ -245,6 +284,9 @@ class Inflection:
     inflection_between: str
     # The robot count of the lowest saturated point. No point above it changes the result.
     robot_count: int
+    # N* from what the model served at that point rather than from its capacity: None where
+    # the point has no served rate.
+    served_inflection_n: float | None
 
 
 def inflection(points: Sequence[ScalePoint], frame_rate_hz: float) -> Inflection | None:
@@ -253,22 +295,27 @@ def inflection(points: Sequence[ScalePoint], frame_rate_hz: float) -> Inflection
     None when a point has no utilization or capacity (a point without a counted run, or a
     runtime with no CPU cost), or when no point is saturated. The capacity is the one at the
     lowest saturated point; nothing is interpolated between points or extrapolated past them.
+    A saturated model serves what its worker can, so the rate it served there gives N* as
+    well, counted against the CPU the worker obtained rather than its whole share.
     """
     measured = [
-        (point.robot_count, point.utilization, point.capacity_fps)
+        (point, point.utilization, point.capacity_fps)
         for point in points
         if point.utilization is not None and point.capacity_fps is not None
     ]
     if len(measured) != len(points):
         return None
-    for index, (robot_count, utilization, capacity_fps) in enumerate(measured):
+    for index, (point, utilization, capacity_fps) in enumerate(measured):
         if utilization >= 1:
             between = (
                 "below 1 robot"
                 if index == 0
-                else f"between {measured[index - 1][0]} and {robot_count} robots"
+                else f"between {measured[index - 1][0].robot_count} and {point.robot_count} robots"
             )
-            return Inflection(capacity_fps, capacity_fps / frame_rate_hz, between, robot_count)
+            served_n = None if point.served_fps is None else point.served_fps / frame_rate_hz
+            return Inflection(
+                capacity_fps, capacity_fps / frame_rate_hz, between, point.robot_count, served_n
+            )
     return None
 
 
@@ -372,6 +419,30 @@ def _metrics(
         )
 
 
+def _extremes(
+    key_prefix: str,
+    scenario_key: str,
+    topology: Topology,
+    summary_path: tuple[str, ...],
+    metrics: Sequence[tuple[str, str]],
+) -> Iterator[FactKey]:
+    """Yield the smallest or the largest run value of each metric, given as (metric, min or max).
+
+    The key ends in the statistic and the path does not, so the key's rule takes that extreme
+    of the runs' values (combine_rule): the value of the run furthest out.
+    """
+    for metric, statistic in metrics:
+        yield _entry(
+            f"{key_prefix}.{metric}.{statistic}",
+            Source.SUMMARY,
+            scenario_key,
+            topology,
+            (*summary_path, *metric.split(".")),
+            _UNITS[_metric_name(metric)],
+            integer=metric in _INTEGER_METRICS,
+        )
+
+
 _RATE_PER_ROBOT = _statistics("commands_per_s_per_robot", "min", "mean", "max")
 _FAIRNESS = _statistics("fairness", "jain", "min_over_mean")
 _STEADY_METRICS = (
@@ -389,6 +460,7 @@ _SWEEP_METRICS = (
     *_statistics("freshness_ms", "p50", "p95"),
     *_statistics("batch_size", "mean", "share_1"),
     "utilization",
+    "watchdog_coverage.mean",
 )
 _MASSIVE_METRICS = (
     *_RATE_PER_ROBOT,
@@ -401,15 +473,17 @@ _MASSIVE_METRICS = (
     "out_of_order_count",
     *_statistics("watchdog_coverage", "min", "mean"),
 )
-_CPU_METRICS = ("utilization", "throttled_ms_per_s")
+_CPU_METRICS = ("utilization", "throttled_ms_per_s", "throttled_share")
 _WINDOWS = ("before", "after")
+# The stale commands of the run that had the most, beside the medians (DESIGN.md 5.6).
+_STALE_HIGHEST = (("stale_count", "max"), ("stale_ratio", "max"))
 
 
 def _steady(prefix: str, topology: Topology) -> Iterator[FactKey]:
     for model in MODEL_KEYS:
-        yield from _metrics(
-            f"{prefix}steady.{model}", "steady", topology, ("models", model, "all"), _STEADY_METRICS
-        )
+        window = ("models", model, "all")
+        yield from _metrics(f"{prefix}steady.{model}", "steady", topology, window, _STEADY_METRICS)
+        yield from _extremes(f"{prefix}steady.{model}", "steady", topology, window, _STALE_HIGHEST)
 
 
 def _late_joiner(prefix: str, topology: Topology) -> Iterator[FactKey]:
@@ -424,16 +498,18 @@ def _late_joiner(prefix: str, topology: Topology) -> Iterator[FactKey]:
                 ("robots", robot_id, model, window),
                 ("commands_per_s", "freshness_ms.p95"),
             )
-        yield _entry(
-            f"{prefix}late_joiner.{model}.settle_s",
-            Source.SETTLE,
-            scenario_key,
-            topology,
-            (),
-            _BINS_UNIT,
-            model=model,
-            integer=True,
-        )
+        # The median settle time and that of the slowest run.
+        for name in ("settle_s", "settle_s.max"):
+            yield _entry(
+                f"{prefix}late_joiner.{model}.{name}",
+                Source.SETTLE,
+                scenario_key,
+                topology,
+                (),
+                _BINS_UNIT,
+                model=model,
+                integer=True,
+            )
         # The time from b's planned join to its first command, which the 1 s bins cannot show.
         yield _entry(
             f"{prefix}late_joiner.b.{model}.first_command_ms",
@@ -459,11 +535,22 @@ def _sweep(prefix: str, topology: Topology) -> Iterator[FactKey]:
         yield from _metrics(
             f"{prefix}sweep.n{count}.cpu", scenario_key, topology, ("cpu", "all"), _CPU_METRICS
         )
+        # The cores each worker obtained, against the whole core its utilization counts.
+        for process in ("worker_cls", "worker_depth"):
+            yield _entry(
+                f"{prefix}sweep.n{count}.{process}.cpu_cores",
+                Source.SUMMARY,
+                scenario_key,
+                topology,
+                ("cpu", "all", "cores", process),
+                "cores",
+            )
     for model in MODEL_KEYS:
         for result, unit in (
             ("capacity_fps", "frames/s"),
             ("inflection_n", "robots"),
             ("inflection_between", ""),
+            ("served_inflection_n", "robots"),
         ):
             yield _entry(
                 f"{prefix}sweep.{model}.{result}",
@@ -515,16 +602,18 @@ def _disconnect(prefix: str, topology: Topology) -> Iterator[FactKey]:
                 ("survivors", model, window),
                 ("commands_per_s_per_robot", "freshness_ms.p95"),
             )
-        yield _entry(
-            f"{prefix}disconnect.{model}.recovery_s",
-            Source.RECOVERY,
-            scenario_key,
-            topology,
-            (),
-            _BINS_UNIT,
-            model=model,
-            integer=True,
-        )
+        # The median recovery time and that of the slowest run.
+        for name in ("recovery_s", "recovery_s.max"):
+            yield _entry(
+                f"{prefix}disconnect.{model}.{name}",
+                Source.RECOVERY,
+                scenario_key,
+                topology,
+                (),
+                _BINS_UNIT,
+                model=model,
+                integer=True,
+            )
     # The summarizer reads the time from the kill to the close off the scrapes, beside its
     # check of the close: aggregation reads no scrape.
     yield _entry(
@@ -587,24 +676,45 @@ def _massive(prefix: str, topology: Topology) -> Iterator[FactKey]:
         )
 
     for model in MODEL_KEYS:
+        window = ("models", model, "all")
         yield from _metrics(
+            f"{prefix}massive.{model}", scenario_key, topology, window, _MASSIVE_METRICS
+        )
+        yield from _extremes(
             f"{prefix}massive.{model}",
             scenario_key,
             topology,
-            ("models", model, "all"),
-            _MASSIVE_METRICS,
+            window,
+            (*_STALE_HIGHEST, ("commands_per_s_per_robot.mean", "min")),
         )
-        # The bound of a run's own check of its gaps (DESIGN.md 6.3), from the run with the
-        # longest gap.
-        yield _entry(
-            f"{prefix}massive.{model}.command_gap_bound_ms",
-            Source.GAP_BOUND,
-            scenario_key,
-            topology,
-            ("checks", f"gaps_within_bound.{model}", "observed", "bound_ms"),
-            _MS,
-            model=model,
-        )
+        # The lowest, the mean and the highest robot of one run, the run whose mean is the
+        # median: the per-robot extremes of the other keys may come from different runs.
+        for statistic in ("min", "mean", "max"):
+            yield _entry(
+                f"{prefix}massive.{model}.median_run.commands_per_s_per_robot.{statistic}",
+                Source.MEDIAN_RUN,
+                scenario_key,
+                topology,
+                (*window, "commands_per_s_per_robot", statistic),
+                _COMMAND_RATE,
+                model=model,
+            )
+        # The bound of a run's own check of its gaps (DESIGN.md 6.3), and the dispatch cycles it
+        # was computed from, from the run with the longest gap.
+        for name, observed in (
+            ("command_gap_bound_ms", "bound_ms"),
+            ("command_gap_cycle_ms", "cycle_ms"),
+            ("command_gap_calibrated_cycle_ms", "calibrated_cycle_ms"),
+        ):
+            yield _entry(
+                f"{prefix}massive.{model}.{name}",
+                Source.GAP_BOUND,
+                scenario_key,
+                topology,
+                ("checks", f"gaps_within_bound.{model}", "observed", observed),
+                _MS,
+                model=model,
+            )
         yield _entry(
             f"{prefix}massive.{model}.useful_robots",
             Source.USEFUL_ROBOTS,
@@ -621,11 +731,27 @@ def _massive(prefix: str, topology: Topology) -> Iterator[FactKey]:
     yield from _metrics(
         f"{prefix}massive.cpu", scenario_key, topology, ("cpu", "all"), _CPU_METRICS
     )
+    yield from _extremes(
+        f"{prefix}massive.cpu",
+        scenario_key,
+        topology,
+        ("cpu", "all"),
+        (("throttled_ms_per_s", "max"),),
+    )
     yield summary("bytes_in_per_s", ("gateway", "all", "bytes_in_per_s"), "bytes/s")
     yield summary("connections.accepted", ("connections", "accepted"), "connections", True)
     yield summary("connections.rejected", ("connections", "rejected"), "connections", True)
     yield summary("gateway.cpu_cores", ("gateway", "all", "cpu_cores"), "cores")
     yield summary("gateway.cpu_ms_per_frame", ("gateway", "all", "cpu_ms_per_frame"), _MS)
+    # Where one event loop would saturate at the cost per frame of this load (DESIGN.md 4.1).
+    yield _entry(
+        f"{prefix}massive.gateway.loop_saturation_robots",
+        Source.LOOP_ROBOTS,
+        scenario_key,
+        topology,
+        ("gateway", "all", "cpu_ms_per_frame"),
+        "robots",
+    )
     yield summary("gateway.loop_lag_ms.p99", ("gateway", "all", "loop_lag_ms", "p99"), _MS)
     yield summary("fleet.cpu_cores", ("cpu", "all", "cores", "fleet"), "cores")
     yield summary("fleet.fire_lag_ms.p99", ("validity", "fire_lag_ms", "p99"), _MS)
@@ -741,6 +867,34 @@ def _predictions() -> Iterator[FactKey]:
         yield prediction(f"disconnect.{window}.survivors.depth.commands_per_s_per_robot")
 
 
+def _curve_points() -> Iterator[FactKey]:
+    """Yield the predicted curves at the robot counts where a measured key sits beside them.
+
+    These are the points that the sweep plots draw beside a measurement, and the bound of
+    depth's longest gap at 50 robots that DESIGN.md 8.2 sets beside the runs' own bounds.
+    """
+    massive_count = len(massive().robots)
+
+    def point(key_prefix: str, robot_count: int, model: str, metric: str) -> FactKey:
+        return _entry(
+            f"{_PREDICT_PREFIX}{key_prefix}.{model}.{metric}",
+            Source.CURVE,
+            None,
+            None,
+            (model, CURVE_FIELDS[metric], str(robot_count)),
+            metric_unit(metric),
+            model=model,
+        )
+
+    for model in MODEL_KEYS:
+        for count in SWEEP_ROBOT_COUNTS:
+            for metric in ("freshness_ms.p50", "freshness_ms.p95", "batch_size.mean"):
+                yield point(f"sweep.n{count}", count, model, metric)
+        for metric in ("freshness_ms.p50", "freshness_ms.p95"):
+            yield point("massive", massive_count, model, metric)
+    yield point("massive", massive_count, "depth", "command_gap_bound_ms")
+
+
 def _ledger() -> Iterator[FactKey]:
     for candidate in CANDIDATES:
         main_path, _ = candidate.main
@@ -768,6 +922,24 @@ def _ledger() -> Iterator[FactKey]:
         )
 
 
+def _comparisons() -> Iterator[FactKey]:
+    """Yield, per arm, the median over its runs of each value of COMPARISON_METRICS."""
+    names = {candidate.name for candidate in CANDIDATES}
+    for candidate, model, metric in COMPARISON_METRICS:
+        if candidate not in names:
+            raise ValueError(f"COMPARISON_METRICS names {candidate}, which is no candidate")
+        for arm in ARMS:
+            yield _entry(
+                f"compare.{candidate}.{arm}.{model}.{metric}",
+                Source.COMPARISON,
+                None,
+                None,
+                (candidate, arm, "models", model, "all", *metric.split(".")),
+                _UNITS[_metric_name(metric)],
+                model=model,
+            )
+
+
 def _environment() -> Iterator[FactKey]:
     for field in ("cpu_model", "kernel", "engine"):
         yield _entry(f"env.{field}", Source.ENVIRONMENT, None, None, (field,), "")
@@ -791,7 +963,9 @@ def _registry() -> dict[str, FactKey]:
             entries.extend(family(prefix, topology))
     entries.extend(_model_bench())
     entries.extend(_predictions())
+    entries.extend(_curve_points())
     entries.extend(_ledger())
+    entries.extend(_comparisons())
     entries.extend(_environment())
     registry = {entry.key: entry for entry in entries}
     if len(registry) != len(entries):

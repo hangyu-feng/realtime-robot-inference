@@ -12,6 +12,8 @@ from hypothesis import strategies as st
 from bench.candidates import CANDIDATES
 from bench.facts import (
     BREAKDOWN_STAGES,
+    COMPARISON_METRICS,
+    CURVE_FIELDS,
     PACING_CONTROL,
     PACING_PRICE_PATH,
     PLACEHOLDER,
@@ -23,11 +25,11 @@ from bench.facts import (
     ScalePoint,
     Source,
     bench_graph,
-    breakdown_run,
     combine_rule,
     combined,
     gap_bound_run,
     inflection,
+    median_run,
     metric_unit,
     placeholder_keys,
     recovery_s,
@@ -35,6 +37,7 @@ from bench.facts import (
     stored,
     useful_robots,
 )
+from bench.runfiles import ARMS
 from cloud.config import Topology
 from common.commands import MODEL_KEYS
 
@@ -45,9 +48,10 @@ COUNTS = tuple(robot_count for _, robot_count in SCALE_POINTS)
 
 
 def points(*utilizations: float | None) -> list[ScalePoint]:
-    """Return the scale points with these utilizations and a capacity of 100 frames/s per robot."""
+    """Return the scale points with these utilizations, a capacity of 100 frames/s per robot
+    and a served rate of 90."""
     return [
-        ScalePoint(robot_count, utilization, 100.0 * robot_count)
+        ScalePoint(robot_count, utilization, 100.0 * robot_count, 90.0 * robot_count)
         for robot_count, utilization in zip(COUNTS, utilizations, strict=True)
     ]
 
@@ -94,6 +98,14 @@ def test_placeholder_keys_lists_each_key_once_in_order_of_appearance() -> None:
         ("soak.cls.fairness.min_over_mean", Combine.SMALLEST),
         ("massive.cls.commands_per_s_per_robot.mean", Combine.MEDIAN),
         ("massive.cls.fairness.jain", Combine.MEDIAN),
+        # A statistic added after a per-run value takes that extreme of the runs.
+        ("massive.depth.stale_ratio.max", Combine.LARGEST),
+        ("steady.depth.stale_count.max", Combine.LARGEST),
+        ("massive.cls.commands_per_s_per_robot.mean.min", Combine.SMALLEST),
+        ("massive.cpu.throttled_ms_per_s.max", Combine.LARGEST),
+        ("late_joiner.depth.settle_s.max", Combine.LARGEST),
+        ("disconnect.depth.recovery_s.max", Combine.LARGEST),
+        ("massive.cpu.throttled_share", Combine.MEDIAN),
     ],
 )
 def test_a_key_combines_its_runs_by_the_rule_of_its_statistic(key: str, rule: Combine) -> None:
@@ -169,12 +181,12 @@ def test_stored_keeps_the_kind_of_number_its_key_has(
 def test_the_breakdown_comes_from_the_run_with_the_median_end_to_end_mean(
     e2e_mean_ms: dict[str, float], chosen: str
 ) -> None:
-    assert breakdown_run(e2e_mean_ms) == chosen
+    assert median_run(e2e_mean_ms) == chosen
 
 
 def test_a_breakdown_without_a_run_is_refused() -> None:
     with pytest.raises(ValueError, match="no run"):
-        breakdown_run({})
+        median_run({})
 
 
 @given(means=st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=9))
@@ -183,7 +195,7 @@ def test_the_breakdown_run_has_the_lower_middle_rank_and_the_smallest_id_at_it(
 ) -> None:
     e2e_mean_ms = {f"run-{index}": float(mean) for index, mean in enumerate(means)}
 
-    chosen = breakdown_run(e2e_mean_ms)
+    chosen = median_run(e2e_mean_ms)
 
     chosen_ms = e2e_mean_ms[chosen]
     below = sum(mean_ms < chosen_ms for mean_ms in e2e_mean_ms.values())
@@ -269,20 +281,29 @@ def test_useful_robots_is_the_end_of_the_run_of_counts_within_the_limit_from_one
 @pytest.mark.parametrize(
     ("utilizations", "expected"),
     [
-        # Saturated at the first point: the capacity there, and no lower measured count.
+        # Saturated at the first point: the capacity there, and no lower measured count. The
+        # served rate there gives the second N*.
         (
             (1.2, 3.0, 5.0, 10.0, 50.0),
-            Inflection(100.0, 100.0 / FRAME_RATE_HZ, "below 1 robot", 1),
+            Inflection(100.0, 100.0 / FRAME_RATE_HZ, "below 1 robot", 1, 90.0 / FRAME_RATE_HZ),
         ),
         # At a middle point of the sweep.
         (
             (0.2, 0.6, 1.0, 2.0, 10.0),
-            Inflection(500.0, 500.0 / FRAME_RATE_HZ, "between 3 and 5 robots", 5),
+            Inflection(
+                500.0, 500.0 / FRAME_RATE_HZ, "between 3 and 5 robots", 5, 450.0 / FRAME_RATE_HZ
+            ),
         ),
         # Only at the massive run.
         (
             (0.1, 0.2, 0.3, 0.6, 3.0),
-            Inflection(5000.0, 5000.0 / FRAME_RATE_HZ, "between 10 and 50 robots", 50),
+            Inflection(
+                5000.0,
+                5000.0 / FRAME_RATE_HZ,
+                "between 10 and 50 robots",
+                50,
+                4500.0 / FRAME_RATE_HZ,
+            ),
         ),
         # At no point, and with a point whose utilization is null.
         ((0.1, 0.2, 0.3, 0.6, 0.9), None),
@@ -298,9 +319,18 @@ def test_the_inflection_is_at_the_lowest_saturated_scale_point(
 
 def test_a_scale_point_without_a_capacity_gives_no_inflection() -> None:
     measured = points(0.2, 0.6, 1.2, 2.0, 10.0)
-    measured[4] = ScalePoint(COUNTS[4], 10.0, None)
+    measured[4] = ScalePoint(COUNTS[4], 10.0, None, 900.0)
 
     assert inflection(measured, FRAME_RATE_HZ) is None
+
+
+def test_a_saturated_point_without_a_served_rate_leaves_only_the_served_n_without_answer() -> None:
+    measured = points(0.2, 0.6, 1.2, 2.0, 10.0)
+    measured[2] = ScalePoint(COUNTS[2], 1.2, 500.0, None)
+
+    assert inflection(measured, FRAME_RATE_HZ) == Inflection(
+        500.0, 500.0 / FRAME_RATE_HZ, "between 3 and 5 robots", 5, None
+    )
 
 
 @pytest.mark.parametrize(
@@ -526,6 +556,26 @@ def test_the_registry_holds_every_key_family_of_the_design_document() -> None:
         "env.engine",
         "env.repeats",
         "split.massive.fleet.cpu_cores",
+        "steady.depth.stale_ratio.max",
+        "late_joiner.depth.settle_s.max",
+        "sweep.n10.depth.watchdog_coverage.mean",
+        "sweep.n10.cpu.throttled_share",
+        "sweep.n10.worker_cls.cpu_cores",
+        "sweep.cls.served_inflection_n",
+        "disconnect.depth.recovery_s.max",
+        "massive.cls.median_run.commands_per_s_per_robot.min",
+        "massive.cls.commands_per_s_per_robot.mean.min",
+        "massive.depth.stale_count.max",
+        "massive.depth.command_gap_cycle_ms",
+        "massive.depth.command_gap_calibrated_cycle_ms",
+        "massive.cpu.throttled_share",
+        "massive.cpu.throttled_ms_per_s.max",
+        "massive.gateway.loop_saturation_robots",
+        "predict.sweep.n10.cls.freshness_ms.p95",
+        "predict.sweep.n5.cls.batch_size.mean",
+        "predict.massive.depth.command_gap_bound_ms",
+        "compare.depth_unpaced.b.cls.commands_per_s_per_robot.mean",
+        "compare.ort_default_threads.a.depth.commands_per_s_per_robot.mean",
     ]
 
     assert [key for key in families if key not in REGISTRY] == []
@@ -639,6 +689,63 @@ def test_the_control_that_turns_pacing_off_guards_the_depth_rate_its_price_is_re
     assert PACING_PRICE_PATH in {guard.path for guard in control.guards}
 
 
+def test_every_comparison_key_reads_one_arm_of_a_candidate_at_its_metric() -> None:
+    comparison = {
+        key: (entry.path, entry.unit, entry.topology, entry.scenario_key)
+        for key, entry in REGISTRY.items()
+        if entry.source is Source.COMPARISON
+    }
+
+    assert comparison == {
+        f"compare.{candidate}.{arm}.{model}.{metric}": (
+            (candidate, arm, "models", model, "all", *metric.split(".")),
+            metric_unit(f"models.{model}.all.{metric}"),
+            None,
+            None,
+        )
+        for candidate, model, metric in COMPARISON_METRICS
+        for arm in ARMS
+    }
+    assert {candidate for candidate, _, _ in COMPARISON_METRICS} <= {
+        candidate.name for candidate in CANDIDATES
+    }
+
+
+def test_every_curve_point_has_the_measured_key_it_is_set_beside() -> None:
+    points = {key: entry for key, entry in REGISTRY.items() if entry.source is Source.CURVE}
+
+    assert [key for key in points if key.removeprefix("predict.") not in REGISTRY] == []
+    assert {entry.path[1] for entry in points.values()} == set(CURVE_FIELDS.values())
+    # The curve is read at the robot count of the measured key's scale point.
+    assert points["predict.sweep.n3.depth.freshness_ms.p50"].path == (
+        "depth",
+        "freshness_ms_p50",
+        "3",
+    )
+    assert points["predict.massive.depth.command_gap_bound_ms"].path == (
+        "depth",
+        "command_gap_bound_ms",
+        "50",
+    )
+
+
+def test_the_median_run_rates_read_the_rate_statistics_of_one_run() -> None:
+    median_rates = {
+        key: (entry.path, entry.model)
+        for key, entry in REGISTRY.items()
+        if entry.source is Source.MEDIAN_RUN and entry.topology is Topology.SINGLE
+    }
+
+    assert median_rates == {
+        f"massive.{model}.median_run.commands_per_s_per_robot.{statistic}": (
+            ("models", model, "all", "commands_per_s_per_robot", statistic),
+            model,
+        )
+        for model in MODEL_KEYS
+        for statistic in ("min", "mean", "max")
+    }
+
+
 @pytest.mark.parametrize(
     "key",
     [
@@ -652,7 +759,10 @@ def test_the_control_that_turns_pacing_off_guards_the_depth_rate_its_price_is_re
         "model_bench.cls.batch_cap",
         "massive.cls.useful_robots",
         "late_joiner.depth.settle_s",
+        "late_joiner.depth.settle_s.max",
         "disconnect.cls.recovery_s",
+        "disconnect.depth.recovery_s.max",
+        "massive.depth.stale_count.max",
         "env.repeats",
     ],
 )
@@ -689,6 +799,18 @@ def test_measured_times_rates_and_ratios_are_not_whole_number_keys(key: str) -> 
         ("predict.steady.depth.freshness_ms.p95", "ms"),
         ("predict.massive.cls.commands_per_s_per_robot.mean", "commands/s"),
         ("massive.memory.sock_mb", "MB"),
+        ("massive.cpu.throttled_share", "ratio"),
+        ("massive.depth.stale_ratio.max", "ratio"),
+        ("massive.cls.commands_per_s_per_robot.mean.min", "commands/s"),
+        ("massive.gateway.loop_saturation_robots", "robots"),
+        ("sweep.n10.worker_cls.cpu_cores", "cores"),
+        ("sweep.n10.depth.watchdog_coverage.mean", "ratio"),
+        ("sweep.cls.served_inflection_n", "robots"),
+        ("predict.sweep.n10.cls.freshness_ms.p95", "ms"),
+        ("predict.sweep.n10.cls.batch_size.mean", "frames"),
+        ("predict.massive.depth.command_gap_bound_ms", "ms"),
+        ("compare.depth_unpaced.b.depth.applied_per_s_per_robot.mean", "commands/s"),
+        ("compare.depth_unpaced.b.depth.stale_ratio", "ratio"),
     ],
 )
 def test_a_key_has_the_unit_its_value_is_rendered_with(key: str, unit: str) -> None:

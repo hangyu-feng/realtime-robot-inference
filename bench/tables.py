@@ -576,7 +576,11 @@ def _memory_budget() -> tuple[_Layout, ...]:
         ("Worker `depth`", "model + arena for the largest batch", "worker_depth.rss_mb"),
         ("Robot fleet", "base + frame pool + N x robot state + samples", "fleet.rss_mb"),
         ("Kernel socket memory", "N x (receive buffer + send buffer), both ends", "memory.sock_mb"),
-        ("Container total (anonymous + socket)", "sum of the above", "memory.anon_sock_mb_end"),
+        (
+            "Container total (anonymous + socket)",
+            "anonymous memory of the container's processes plus socket memory",
+            "memory.anon_sock_mb_end",
+        ),
     )
     return (
         _Layout(
@@ -943,7 +947,13 @@ _FACT_FILES: tuple[tuple[str, str, str, Callable[[], tuple[_Layout, ...]]], ...]
         "residual come from one run.",
         _breakdown,
     ),
-    ("memory_budget.md", "Memory budget", "DESIGN.md 8.3, `single` topology.", _memory_budget),
+    (
+        "memory_budget.md",
+        "Memory budget",
+        "DESIGN.md 8.3, `single` topology. A process row is the process's resident set, which "
+        "counts shared library pages too, so the rows add up to more than the container total.",
+        _memory_budget,
+    ),
     ("env.md", "Test machines", "Where the counted runs were measured.", _env),
 )
 _PREDICTED_INTRO = (

@@ -55,10 +55,7 @@ PLOT_FILES = (
     "coverage_vs_watchdog.png",
     "model_tb.png",
     "fifo_vs_latest.png",
-    "delay_sweep.png",
 )
-# The plots of experiments that no scenario runs yet.
-NEVER_RUN = ("delay_sweep.png",)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 CODE_DIGEST = "c0de" * 16
@@ -372,14 +369,9 @@ def test_every_plot_of_the_design_is_written_as_a_png(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("name", [name for name in PLOT_FILES if name not in NEVER_RUN])
+@pytest.mark.parametrize("name", PLOT_FILES)
 def test_a_plot_with_counted_runs_is_drawn(drawn: dict[str, Plot], name: str) -> None:
     assert drawn[name].drawn
-
-
-@pytest.mark.parametrize("name", NEVER_RUN)
-def test_an_experiment_without_a_scenario_says_not_run(drawn: dict[str, Plot], name: str) -> None:
-    assert not drawn[name].drawn
 
 
 def test_every_plot_is_drawn_from_the_summaries_and_the_facts_that_the_pipeline_writes(
@@ -387,7 +379,7 @@ def test_every_plot_is_drawn_from_the_summaries_and_the_facts_that_the_pipeline_
 ) -> None:
     plots = render(evidence_root)
 
-    assert [name for name, plot in plots.items() if not plot.drawn] == list(NEVER_RUN)
+    assert [name for name, plot in plots.items() if not plot.drawn] == []
 
 
 def test_the_same_inputs_give_the_same_bytes(tmp_path: Path, drawn: dict[str, Plot]) -> None:
@@ -464,7 +456,7 @@ def test_every_plot_with_counted_runs_is_drawn_without_predictions(tmp_path: Pat
 
     plots = render(tmp_path)
 
-    assert [name for name, plot in plots.items() if not plot.drawn] == list(NEVER_RUN)
+    assert [name for name, plot in plots.items() if not plot.drawn] == []
 
 
 @pytest.mark.parametrize(

@@ -45,10 +45,10 @@ from bench.facts import (
     FactKey,
     ScalePoint,
     Source,
-    breakdown_run,
     combined,
     gap_bound_run,
     inflection,
+    median_run,
     placeholder_keys,
     recovery_s,
     settle_s,
@@ -107,6 +107,7 @@ _GIT_TIMEOUT_S = 60.0
 _ATTEMPT = re.compile(r"\.attempt[0-9]+$")
 _NS_PER_MS = 1_000_000
 _US_PER_MS = 1_000
+_MS_PER_S = 1_000
 # The predictions are made as the capacity model's own command makes them: one seed for
 # the robots' phases, and a curve from one robot to the robots of the massive demo.
 _PREDICTION_SEED = 0
@@ -210,8 +211,9 @@ class _Inputs:
     failed_attempts: Mapping[str, int]
     # The groups of the evidence plan, in its order.
     evidence_groups: tuple[str, ...]
-    # The facts object of predictions.json; None when no predictions were made.
+    # The facts and the curves objects of predictions.json; None when no predictions were made.
     predictions: Mapping[str, Any] | None
+    curves: Mapping[str, Any] | None
     ledger: Mapping[str, Mapping[str, Any]]
     config: ServerConfig
 
@@ -697,9 +699,11 @@ def _groups(entry: FactKey, inputs: _Inputs) -> list[str]:
     """Return the groups whose runs a key reads."""
     if entry.source is Source.LEDGER:
         return [f"{COMPARE_DIRECTORY}/{entry.path[0]}/{arm}" for arm in ARMS]
+    if entry.source is Source.COMPARISON:
+        return [f"{COMPARE_DIRECTORY}/{entry.path[0]}/{entry.path[1]}"]
     if entry.source is Source.ENVIRONMENT:
         return list(inputs.evidence_groups)
-    if entry.source is Source.PREDICTION:
+    if entry.source in (Source.PREDICTION, Source.CURVE):
         return [_BENCH_GROUP]
     return [f"{entry.scenario_key}:{entry.topology}"]
 
@@ -807,6 +811,9 @@ def _run_value(entry: FactKey, run: CountedRun) -> float | None:
         return None
     if entry.source in _RUN_RULES:
         return _RUN_RULES[entry.source](run, _model_of(entry))
+    if entry.source is Source.COMPARISON:
+        # The first two parts name the candidate and the arm, which the run's group holds.
+        return _number(run.summary, entry.path[2:], run.path)
     return _number(run.summary, entry.path, run.path)
 
 
@@ -841,7 +848,13 @@ def _one_run_fact(
 
 def _breakdown_fact(entry: FactKey, inputs: _Inputs) -> Fact:
     """Build a fact of the breakdown: its value comes from one run per model (DESIGN.md 7)."""
-    return _one_run_fact(entry, inputs, breakdown_run, (*entry.path[:3], "e2e_ms", "mean"))
+    return _one_run_fact(entry, inputs, median_run, (*entry.path[:3], "e2e_ms", "mean"))
+
+
+def _median_run_fact(entry: FactKey, inputs: _Inputs) -> Fact:
+    """Build a fact of the run whose mean rate per robot of the model is the median."""
+    rate_path = ("models", _model_of(entry), "all", "commands_per_s_per_robot", "mean")
+    return _one_run_fact(entry, inputs, median_run, rate_path)
 
 
 def _gap_bound_fact(entry: FactKey, inputs: _Inputs) -> Fact:
@@ -863,6 +876,7 @@ def _inflection_fact(entry: FactKey, inputs: _Inputs) -> Fact:
             robot_count,
             _point_median(inputs, entry, scenario_key, ("utilization",)),
             _point_median(inputs, entry, scenario_key, ("capacity_fps",)),
+            _point_median(inputs, entry, scenario_key, ("commands_per_s",)),
         )
         for scenario_key, robot_count in SCALE_POINTS
     ]
@@ -883,6 +897,20 @@ def _useful_robots_fact(entry: FactKey, inputs: _Inputs) -> Fact:
     # later point changes the value; with no such point, or no value, every point decides.
     above = None if value is None else next((count for count, _ in peaks if count > value), None)
     return _fact(entry, value, _behind(inputs, _scale_groups(entry, above)))
+
+
+def _loop_robots_fact(entry: FactKey, inputs: _Inputs) -> Fact:
+    """Build, per run, the robots at the configured frame rate whose frames fill one core."""
+    behind = _behind(inputs, _groups(entry, inputs))
+    values: list[float] = []
+    for run in behind.runs:
+        cost_ms = _number(run.summary, entry.path, run.path)
+        if cost_ms is None:
+            continue
+        if cost_ms <= 0:
+            raise AggregateError(f"{run.path}: {'.'.join(entry.path)} must be above 0")
+        values.append(_MS_PER_S / (inputs.config.frame_rate_hz * cost_ms))
+    return _fact(entry, combined(values, entry) if values else None, behind, values)
 
 
 def _batch_plan_fact(entry: FactKey, inputs: _Inputs) -> Fact:
@@ -911,6 +939,27 @@ def _prediction_fact(entry: FactKey, inputs: _Inputs) -> Fact:
     if inputs.predictions is None:
         return _fact(entry, None, behind)
     value = _number(inputs.predictions, (entry.key,), PREDICTIONS_FILE)
+    return _fact(entry, None if value is None else float(value), behind)
+
+
+def _curve_fact(entry: FactKey, inputs: _Inputs) -> Fact:
+    """Build the value of a predicted curve at one robot count."""
+    behind = _behind(inputs, _groups(entry, inputs))
+    if inputs.curves is None:
+        return _fact(entry, None, behind)
+    model, field, count = entry.path
+    robots = lookup(inputs.curves, ("robots",))
+    values = lookup(inputs.curves, (model, field))
+    if (
+        not isinstance(robots, list)
+        or not isinstance(values, list)
+        or len(values) != len(robots)
+        or int(count) not in robots
+    ):
+        raise AggregateError(f"{PREDICTIONS_FILE}: curves.{model}.{field} has no value at {count}")
+    value = values[robots.index(int(count))]
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
+        raise AggregateError(f"{PREDICTIONS_FILE}: curves.{model}.{field} must hold numbers")
     return _fact(entry, None if value is None else float(value), behind)
 
 
@@ -947,12 +996,16 @@ _BUILDERS: Mapping[Source, Callable[[FactKey, _Inputs], Fact]] = {
     Source.SETTLE: _per_run_fact,
     Source.RECOVERY: _per_run_fact,
     Source.DETECT: _per_run_fact,
+    Source.COMPARISON: _per_run_fact,
     Source.BREAKDOWN: _breakdown_fact,
+    Source.MEDIAN_RUN: _median_run_fact,
     Source.GAP_BOUND: _gap_bound_fact,
     Source.INFLECTION: _inflection_fact,
     Source.USEFUL_ROBOTS: _useful_robots_fact,
+    Source.LOOP_ROBOTS: _loop_robots_fact,
     Source.BATCH_PLAN: _batch_plan_fact,
     Source.PREDICTION: _prediction_fact,
+    Source.CURVE: _curve_fact,
     Source.LEDGER: _ledger_fact,
     Source.ENVIRONMENT: _environment_fact,
 }
@@ -980,23 +1033,34 @@ def _tally(
     return attempts, failed
 
 
+@dataclass(frozen=True)
+class _ModelCosts:
+    """The text of t_b.json and of predictions.json, and the predicted facts and curves."""
+
+    t_b_text: str | None
+    predictions_text: str | None
+    predicted: Mapping[str, Any] | None
+    curves: Mapping[str, Any] | None
+
+
 def _model_costs(
     model_set: ModelSet, config: ServerConfig, bench_runs: Sequence[CountedRun]
-) -> tuple[str | None, str | None, Mapping[str, Any] | None]:
-    """Return the text of t_b.json, that of predictions.json, and the predicted facts.
+) -> _ModelCosts:
+    """Return what the capacity model takes and predicts.
 
-    None for all three where no prediction is made: without a counted model benchmark run,
-    and on the null model set, whose models have no cost to predict from.
+    None throughout where no prediction is made: without a counted model benchmark run, and
+    on the null model set, whose models have no cost to predict from.
     """
     if not bench_runs or model_set is ModelSet.NULL:
-        return None, None, None
+        return _ModelCosts(None, None, None, None)
     t_b_text = _json_text(t_b_document(model_set, config, bench_runs))
     document = predictions_document(config, t_b_text)
-    predicted = document["facts"]
-    if not isinstance(predicted, dict):
-        raise AggregateError(f"{PREDICTIONS_FILE}: facts must be an object")
+    predicted, curves = document["facts"], document["curves"]
+    if not isinstance(predicted, dict) or not isinstance(curves, dict):
+        raise AggregateError(f"{PREDICTIONS_FILE}: facts and curves must be objects")
     # Written as the capacity model's own command writes it.
-    return t_b_text, json.dumps(document, indent=2, allow_nan=False) + "\n", predicted
+    text = json.dumps(document, indent=2, allow_nan=False) + "\n"
+    return _ModelCosts(t_b_text, text, predicted, curves)
 
 
 def _listings(
@@ -1033,9 +1097,7 @@ def _outputs(
     for run in sorted(counted, key=lambda run: run.run_id):
         runs[group_of(run.spec)] = (*runs.get(group_of(run.spec), ()), run)
     config = load_config({OVERRIDES_VARIABLE: json.dumps(overrides_for(model_set, {}))})
-    t_b_text, predictions_text, predicted = _model_costs(
-        model_set, config, runs.get(_BENCH_GROUP, ())
-    )
+    costs = _model_costs(model_set, config, runs.get(_BENCH_GROUP, ()))
     lines = [
         ledger_line(
             candidate,
@@ -1048,7 +1110,8 @@ def _outputs(
         attempts=tally[0],
         failed_attempts=tally[1],
         evidence_groups=evidence_groups,
-        predictions=predicted,
+        predictions=costs.predicted,
+        curves=costs.curves,
         ledger={str(line["name"]): line for line in lines},
         config=config,
     )
@@ -1060,8 +1123,8 @@ def _outputs(
     )
     excluded_text, failed_checks_text = _listings(counted, excluded)
     return {
-        f"{SUMMARY_DIRECTORY}/{T_B_FILE}": t_b_text,
-        f"{SUMMARY_DIRECTORY}/{PREDICTIONS_FILE}": predictions_text,
+        f"{SUMMARY_DIRECTORY}/{T_B_FILE}": costs.t_b_text,
+        f"{SUMMARY_DIRECTORY}/{PREDICTIONS_FILE}": costs.predictions_text,
         f"{SUMMARY_DIRECTORY}/{FACTS_FILE}": facts.to_json(),
         LEDGER_FILE: "".join(
             json.dumps(line, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"

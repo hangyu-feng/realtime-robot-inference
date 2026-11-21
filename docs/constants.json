@@ -226,6 +226,11 @@
       "source": "the frame width, 640 px of 640x480 (the brief's Problem Statement; DESIGN.md 1.1, README; FRAME_WIDTH_PX in common/protocol.py)"
     },
     {
+      "text": "900",
+      "category": "design",
+      "source": "the queue bound of the FIFO control, 900 frames: the whole 30 s steady run at 30 fps, so that the queue never fills (DESIGN.md 2 Q2, 4.4, 5.1, 12; ServerConfig.fifo_capacity_frames in cloud/config.py)"
+    },
+    {
       "text": "1000",
       "category": "protocol",
       "source": "WebSocket close code 1000, normal (DESIGN.md 4.3, CloseCode.NORMAL in common/protocol.py)"
@@ -233,7 +238,7 @@
     {
       "text": "1000",
       "category": "derived",
-      "source": "1000 ms per second in the formulas tau = 1000 / f, K_m = 1000 x s_m / c_m, G_m(N) = 1000 / x_m(N) (DESIGN.md 6.3) and in the loop's saturation point, 1000 / (30 x the CPU-ms per frame) robots (DESIGN.md 4.1, 14)"
+      "source": "1000 ms per second in the formulas tau = 1000 / f, K_m = 1000 x s_m / c_m, G_m(N) = 1000 / x_m(N) (DESIGN.md 6.3), in the loop's saturation point, 1000 / (30 x the CPU-ms per frame) robots (DESIGN.md 4.1, 14), and as the length of a second that throttled time, summed over CPUs, can exceed (DESIGN.md 6.4)"
     },
     {
       "text": "1001",
@@ -347,8 +352,10 @@
     "R2",
     "R3",
     "T1",
+    "b49d189",
     "breakdown_n5",
     "cls_cap_1",
+    "d8a365a",
     "depth_cap_2",
     "depth_cap_4",
     "e2e_ms",
@@ -358,6 +365,7 @@
     "p50",
     "p95",
     "p99",
+    "r1",
     "sha256",
     "share_1",
     "sweep_n1",
