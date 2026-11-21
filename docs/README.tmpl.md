@@ -76,7 +76,7 @@ docker compose exec system python -m bench.run --run-dir /tmp/steady --scenario 
 | Disconnect | `disconnect` |
 | Massive connections | `massive`, and `soak` for its long memory run |
 
-`worker_kill` is accepted too, but a hand run only streams its robots: the kill of the depth worker is done by the evidence runner.
+`worker_kill` is accepted too, but a hand run only streams its robots: the evidence runner kills the depth worker.
 
 The run directory must not hold a run already, so give each run a new one. The driver writes the run's config, the robots' plans, `events.jsonl`, `scrapes.jsonl.gz` and the per-command samples of every robot that ran to the end into it, then prints one line per robot and model:
 
