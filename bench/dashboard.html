@@ -438,7 +438,8 @@ function drawChart(spec, points) {
   }
   const plotBottom = height - MARGIN.bottom;
   const first = Math.floor(points[0].t_s);
-  const lastT = last.t_s > first ? last.t_s : first + 1;
+  // The axis spans at least one second, so a lone first point does not get millisecond ticks.
+  const lastT = Math.max(last.t_s, first + 1);
   let highest = shownReference ? shownReference.value : 0;
   for (const item of series) {
     for (const point of points) {
