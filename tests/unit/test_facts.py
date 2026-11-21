@@ -24,6 +24,7 @@ from bench.facts import (
     breakdown_run,
     combine_rule,
     combined,
+    gap_bound_run,
     inflection,
     metric_unit,
     placeholder_keys,
@@ -89,7 +90,6 @@ def test_placeholder_keys_lists_each_key_once_in_order_of_appearance() -> None:
         ("massive.cls.commands_per_s_per_robot.min", Combine.SMALLEST),
         ("split.massive.depth.watchdog_coverage.min", Combine.SMALLEST),
         ("soak.cls.fairness.min_over_mean", Combine.SMALLEST),
-        ("massive.depth.command_gap_bound_ms", Combine.SMALLEST),
         ("massive.cls.commands_per_s_per_robot.mean", Combine.MEDIAN),
         ("massive.cls.fairness.jain", Combine.MEDIAN),
     ],
@@ -109,7 +109,6 @@ def test_a_key_combines_its_runs_by_the_rule_of_its_statistic(key: str, rule: Co
         ("steady.cls.freshness_ms.max", [9.0, 1.0, 4.0], 9.0),
         ("massive.cls.commands_per_s_per_robot.min", [9.0, 1.0, 4.0], 1.0),
         ("massive.cls.fairness.min_over_mean", [0.9, 0.5, 0.7], 0.5),
-        ("massive.depth.command_gap_bound_ms", [900.0, 700.0, 800.0], 700.0),
     ],
 )
 def test_run_values_combine_by_the_rule_of_the_key(
@@ -191,6 +190,45 @@ def test_the_breakdown_run_has_the_lower_middle_rank_and_the_smallest_id_at_it(
     assert chosen == min(run_id for run_id, mean_ms in e2e_mean_ms.items() if mean_ms == chosen_ms)
 
 
+@pytest.mark.parametrize(
+    ("gap_max_ms", "chosen"),
+    [
+        ({"run-1": 9396.0, "run-2": 10686.0, "run-3": 9473.0}, "run-2"),
+        # Two runs share the longest gap: the smaller run id.
+        ({"run-3": 300.0, "run-2": 300.0, "run-1": 200.0}, "run-2"),
+        ({"run-1": 5.0}, "run-1"),
+    ],
+)
+def test_the_gap_bound_comes_from_the_run_with_the_longest_gap(
+    gap_max_ms: dict[str, float], chosen: str
+) -> None:
+    assert gap_bound_run(gap_max_ms) == chosen
+
+
+def test_a_gap_bound_without_a_run_is_refused() -> None:
+    with pytest.raises(ValueError, match="no run"):
+        gap_bound_run({})
+
+
+@given(
+    gaps=st.lists(
+        st.tuples(st.floats(min_value=0.0, max_value=1e5), st.floats(min_value=0.0, max_value=1e5)),
+        min_size=1,
+        max_size=9,
+    )
+)
+def test_the_longest_gap_is_never_shown_above_the_bound_when_every_run_met_its_own(
+    gaps: list[tuple[float, float]],
+) -> None:
+    gap_max_ms = {f"run-{index}": gap_ms for index, (gap_ms, _) in enumerate(gaps)}
+    bound_ms = {f"run-{index}": gap_ms + slack_ms for index, (gap_ms, slack_ms) in enumerate(gaps)}
+
+    chosen = gap_bound_run(gap_max_ms)
+
+    assert gap_max_ms[chosen] == max(gap_max_ms.values())
+    assert gap_max_ms[chosen] <= bound_ms[chosen]
+
+
 @given(values=st.lists(st.floats(min_value=-1e6, max_value=1e6), min_size=1, max_size=9))
 def test_a_combined_value_lies_within_the_run_values_and_an_extreme_is_one_of_them(
     values: list[float],
@@ -230,16 +268,19 @@ def test_useful_robots_is_the_end_of_the_run_of_counts_within_the_limit_from_one
     ("utilizations", "expected"),
     [
         # Saturated at the first point: the capacity there, and no lower measured count.
-        ((1.2, 3.0, 5.0, 10.0, 50.0), Inflection(100.0, 100.0 / FRAME_RATE_HZ, "below 1 robot")),
+        (
+            (1.2, 3.0, 5.0, 10.0, 50.0),
+            Inflection(100.0, 100.0 / FRAME_RATE_HZ, "below 1 robot", 1),
+        ),
         # At a middle point of the sweep.
         (
             (0.2, 0.6, 1.0, 2.0, 10.0),
-            Inflection(500.0, 500.0 / FRAME_RATE_HZ, "between 3 and 5 robots"),
+            Inflection(500.0, 500.0 / FRAME_RATE_HZ, "between 3 and 5 robots", 5),
         ),
         # Only at the massive run.
         (
             (0.1, 0.2, 0.3, 0.6, 3.0),
-            Inflection(5000.0, 5000.0 / FRAME_RATE_HZ, "between 10 and 50 robots"),
+            Inflection(5000.0, 5000.0 / FRAME_RATE_HZ, "between 10 and 50 robots", 50),
         ),
         # At no point, and with a point whose utilization is null.
         ((0.1, 0.2, 0.3, 0.6, 0.9), None),

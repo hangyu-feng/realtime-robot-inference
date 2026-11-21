@@ -5,9 +5,9 @@ one entry per key: the scenario key and topology whose counted runs it reads, wh
 lies in a run's summary.json or which rule computes it, its unit, how the values of several
 runs combine, and whether it is a whole number. The rules that need more than one path of
 one summary are here as functions of plain values: the inflection point, the useful robot
-count, the settle and recovery times, and the run a model's breakdown is taken from. The
-placeholder that names a key in a template is defined beside the keys. Nothing here reads a
-file.
+count, the settle and recovery times, and the runs a model's breakdown and its gap bound are
+taken from. The placeholder that names a key in a template is defined beside the keys.
+Nothing here reads a file.
 """
 
 from __future__ import annotations
@@ -95,6 +95,7 @@ class Source(StrEnum):
 
     SUMMARY = "summary"  # each counted run's summary.json, at the entry's path
     BREAKDOWN = "breakdown"  # the summary of the one run a model's breakdown is taken from
+    GAP_BOUND = "gap_bound"  # the summary of the run with the model's longest gap
     SETTLE = "settle"  # per run, from the two robots' commands in 1 s bins
     RECOVERY = "recovery"  # per run, from the survivors' commands in 1 s bins
     # Per run, at the entry's path, only where the run's check of the abnormal close passed.
@@ -161,13 +162,12 @@ def combine_rule(key: str) -> Combine:
     """Return how a key's run values combine.
 
     A statistic that is itself an extreme takes the extreme over the runs, so a reported
-    extreme is a value some run observed and the extreme of every counted run. The gap bound
-    takes the smallest, so the longest gap shown beside it meets the tightest bound.
+    extreme is a value some run observed and the extreme of every counted run.
     """
     last = key.rpartition(".")[2]
     if last == "max":
         return Combine.LARGEST
-    if last in ("min", "command_gap_bound_ms") or key.endswith("fairness.min_over_mean"):
+    if last == "min" or key.endswith("fairness.min_over_mean"):
         return Combine.SMALLEST
     return Combine.MEDIAN
 
@@ -206,6 +206,20 @@ def breakdown_run(e2e_mean_ms: Mapping[str, float]) -> str:
     return min(run_id for run_id, mean_ms in e2e_mean_ms.items() if mean_ms == middle_ms)
 
 
+def gap_bound_run(gap_max_ms: Mapping[str, float]) -> str:
+    """Return the run a model's gap bound is taken from, given each run's longest gap.
+
+    It is the run with the longest gap, the smaller run id where two runs share it. Shown
+    beside the longest gap, the bound is then the one that gap was checked against; a bound
+    combined over the runs could be another run's, tighter than this run's, and the pair
+    would read as a violation that no run had.
+    """
+    if not gap_max_ms:
+        raise ValueError("no run to take the gap bound from")
+    longest_ms = max(gap_max_ms.values())
+    return min(run_id for run_id, gap_ms in gap_max_ms.items() if gap_ms == longest_ms)
+
+
 @dataclass(frozen=True)
 class ScalePoint:
     """One robot count of the scale points, with the medians over its counted runs."""
@@ -222,6 +236,8 @@ class Inflection:
     capacity_fps: float
     inflection_n: float
     inflection_between: str
+    # The robot count of the lowest saturated point. No point above it changes the result.
+    robot_count: int
 
 
 def inflection(points: Sequence[ScalePoint], frame_rate_hz: float) -> Inflection | None:
@@ -245,7 +261,7 @@ def inflection(points: Sequence[ScalePoint], frame_rate_hz: float) -> Inflection
                 if index == 0
                 else f"between {measured[index - 1][0]} and {robot_count} robots"
             )
-            return Inflection(capacity_fps, capacity_fps / frame_rate_hz, between)
+            return Inflection(capacity_fps, capacity_fps / frame_rate_hz, between, robot_count)
     return None
 
 
@@ -561,11 +577,16 @@ def _massive(prefix: str, topology: Topology) -> Iterator[FactKey]:
             ("models", model, "all"),
             _MASSIVE_METRICS,
         )
-        # The bound of the run's own check of its gaps (DESIGN.md 6.3).
-        yield summary(
-            f"{model}.command_gap_bound_ms",
+        # The bound of a run's own check of its gaps (DESIGN.md 6.3), from the run with the
+        # longest gap.
+        yield _entry(
+            f"{prefix}massive.{model}.command_gap_bound_ms",
+            Source.GAP_BOUND,
+            scenario_key,
+            topology,
             ("checks", f"gaps_within_bound.{model}", "observed", "bound_ms"),
             _MS,
+            model=model,
         )
         yield _entry(
             f"{prefix}massive.{model}.useful_robots",

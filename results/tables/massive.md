@@ -13,7 +13,7 @@ DESIGN.md 9.5, `single` topology. A measured cell shows the fact's value, with t
 | Lowest over mean rate | 0.996 (0.996 to 0.999) | 0.694 (0.694 to 0.932) |
 | Jain index | 1.000 (1.000 to 1.000) | 0.984 (0.981 to 0.987) |
 | Longest command gap (ms) | 310 (262 to 310) | 10686 (9396 to 10686) |
-| Command gap bound (ms) | 307 (307 to 380) | 9599 (9599 to 10914) |
+| Command gap bound (ms) | 380 (307 to 380) | 10914 (9599 to 10914) |
 | Freshness p50 (ms) | 46.4 (45.4 to 51.1) | 118 (112 to 132) |
 | Freshness p95 (ms) | 62.6 (60.9 to 69.2) | 138 (136 to 156) |
 | Freshness p99 (ms) | 72.0 (66.6 to 79.1) | 146 (145 to 171) |

@@ -47,6 +47,7 @@ from bench.facts import (
     Source,
     breakdown_run,
     combined,
+    gap_bound_run,
     inflection,
     placeholder_keys,
     recovery_s,
@@ -700,9 +701,21 @@ def _groups(entry: FactKey, inputs: _Inputs) -> list[str]:
         return list(inputs.evidence_groups)
     if entry.source is Source.PREDICTION:
         return [_BENCH_GROUP]
-    if entry.scenario_key is None:
-        return [f"{scenario_key}:{entry.topology}" for scenario_key, _ in SCALE_POINTS]
     return [f"{entry.scenario_key}:{entry.topology}"]
+
+
+def _scale_groups(entry: FactKey, through_robot_count: int | None) -> list[str]:
+    """Return the groups of the scale points up to a robot count; every point's for None.
+
+    A key computed across the scale points reads every point, and is null when one has no
+    median, but its value can be decided below the last point. Its fact then rests on the
+    runs of the points that decided it, and carries their failed checks alone.
+    """
+    return [
+        f"{scenario_key}:{entry.topology}"
+        for scenario_key, robot_count in SCALE_POINTS
+        if through_robot_count is None or robot_count <= through_robot_count
+    ]
 
 
 def _scenario(run: CountedRun) -> Scenario:
@@ -804,22 +817,37 @@ def _per_run_fact(entry: FactKey, inputs: _Inputs) -> Fact:
     return _fact(entry, combined(values, entry) if values else None, behind, values)
 
 
-def _breakdown_fact(entry: FactKey, inputs: _Inputs) -> Fact:
-    """Build a fact of the breakdown: its value comes from one run per model (DESIGN.md 7)."""
+def _one_run_fact(
+    entry: FactKey,
+    inputs: _Inputs,
+    choose: Callable[[Mapping[str, float]], str],
+    by_path: Sequence[str],
+) -> Fact:
+    """Build a fact whose value is one run's, chosen from each run's number at by_path."""
     behind = _behind(inputs, _groups(entry, inputs))
-    e2e_path = (*entry.path[:3], "e2e_ms", "mean")
-    e2e_mean_ms = {
-        run.run_id: mean_ms
+    by_run = {
+        run.run_id: number
         for run in behind.runs
-        if (mean_ms := _number(run.summary, e2e_path, run.path)) is not None
+        if (number := _number(run.summary, by_path, run.path)) is not None
     }
     values = [value for run in behind.runs if (value := _run_value(entry, run)) is not None]
-    if not e2e_mean_ms:
+    if not by_run:
         return _fact(entry, None, behind, values)
-    chosen = breakdown_run(e2e_mean_ms)
+    chosen = choose(by_run)
     (run,) = (run for run in behind.runs if run.run_id == chosen)
     value = _number(run.summary, entry.path, run.path)
     return _fact(entry, None if value is None else stored(value, entry.integer), behind, values)
+
+
+def _breakdown_fact(entry: FactKey, inputs: _Inputs) -> Fact:
+    """Build a fact of the breakdown: its value comes from one run per model (DESIGN.md 7)."""
+    return _one_run_fact(entry, inputs, breakdown_run, (*entry.path[:3], "e2e_ms", "mean"))
+
+
+def _gap_bound_fact(entry: FactKey, inputs: _Inputs) -> Fact:
+    """Build a gap bound: that of the run whose longest gap is the value of the gap fact."""
+    gap_path = ("models", _model_of(entry), "all", "command_gap_ms", "max")
+    return _one_run_fact(entry, inputs, gap_bound_run, gap_path)
 
 
 def _point_median(
@@ -839,8 +867,10 @@ def _inflection_fact(entry: FactKey, inputs: _Inputs) -> Fact:
         for scenario_key, robot_count in SCALE_POINTS
     ]
     found = inflection(points, inputs.config.frame_rate_hz)
-    value = None if found is None else asdict(found)[entry.path[0]]
-    return _fact(entry, value, _behind(inputs, _groups(entry, inputs)))
+    if found is None:
+        return _fact(entry, None, _behind(inputs, _scale_groups(entry, None)))
+    groups = _scale_groups(entry, found.robot_count)
+    return _fact(entry, asdict(found)[entry.path[0]], _behind(inputs, groups))
 
 
 def _useful_robots_fact(entry: FactKey, inputs: _Inputs) -> Fact:
@@ -849,7 +879,10 @@ def _useful_robots_fact(entry: FactKey, inputs: _Inputs) -> Fact:
         for scenario_key, robot_count in SCALE_POINTS
     ]
     value = useful_robots(peaks, DEFAULT_WATCHDOG_MS[_model_of(entry)])
-    return _fact(entry, value, _behind(inputs, _groups(entry, inputs)))
+    # The point after the largest count within the limit is the first one above it, and no
+    # later point changes the value; with no such point, or no value, every point decides.
+    above = None if value is None else next((count for count, _ in peaks if count > value), None)
+    return _fact(entry, value, _behind(inputs, _scale_groups(entry, above)))
 
 
 def _batch_plan_fact(entry: FactKey, inputs: _Inputs) -> Fact:
@@ -911,6 +944,7 @@ _BUILDERS: Mapping[Source, Callable[[FactKey, _Inputs], Fact]] = {
     Source.RECOVERY: _per_run_fact,
     Source.DETECT: _per_run_fact,
     Source.BREAKDOWN: _breakdown_fact,
+    Source.GAP_BOUND: _gap_bound_fact,
     Source.INFLECTION: _inflection_fact,
     Source.USEFUL_ROBOTS: _useful_robots_fact,
     Source.BATCH_PLAN: _batch_plan_fact,

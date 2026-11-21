@@ -371,18 +371,25 @@ def test_a_fact_combines_the_values_of_its_counted_runs_by_its_rule(
     assert len(fact.run_ids) == len(run_values)
 
 
-def test_the_gap_bound_is_the_smallest_bound_of_any_run(tmp_path: Path) -> None:
-    for repeat, bound_ms in enumerate((900.0, 700.0, 800.0), start=1):
-        check = {
-            "name": "gaps_within_bound.depth",
-            "passed": True,
-            "observed": {"bound_ms": bound_ms},
-        }
-        write_given(tmp_path, plan_spec("massive", repeat=repeat), {"checks": [check]})
+def gap_summary(gap_ms: float, bound_ms: float) -> dict[str, Any]:
+    """Return a 50-robot summary whose longest depth gap passed its check against the bound."""
+    check = {"name": "gaps_within_bound.depth", "passed": True, "observed": {"bound_ms": bound_ms}}
+    return nested({"models.depth.all.command_gap_ms.max": gap_ms}) | {"checks": [check]}
 
-    fact = built(tmp_path)["massive.depth.command_gap_bound_ms"]
 
-    assert (fact.value, fact.min, fact.max) == (700.0, 700.0, 900.0)
+def test_the_gap_bound_is_the_bound_of_the_run_with_the_longest_gap(tmp_path: Path) -> None:
+    # Each run's gap is within its own bound, and the longest gap is above the tightest bound,
+    # which is another run's.
+    for repeat, (gap_ms, bound_ms) in enumerate(
+        ((10686.0, 10914.0), (9396.0, 9599.0), (9473.0, 9681.0)), start=1
+    ):
+        write_given(tmp_path, plan_spec("massive", repeat=repeat), gap_summary(gap_ms, bound_ms))
+
+    facts = built(tmp_path)
+
+    bound = facts["massive.depth.command_gap_bound_ms"]
+    assert (facts["massive.depth.command_gap_ms.max"].value, bound.value) == (10686.0, 10914.0)
+    assert (bound.min, bound.max, bound.runs) == (9599.0, 10914.0, 3)
 
 
 @pytest.mark.parametrize(
@@ -735,7 +742,8 @@ def test_the_inflection_and_the_useful_robots_are_read_off_the_medians_of_the_sc
     )
     inflection_n = facts["sweep.cls.inflection_n"]
     assert (inflection_n.runs, inflection_n.min, inflection_n.max) == (1, None, None)
-    assert len(inflection_n.run_ids) == 6
+    # The runs of the points up to 10 robots, where it saturates.
+    assert len(inflection_n.run_ids) == 5
     # Depth has no utilization at any point, and the split topology no counted run.
     assert facts["sweep.depth.inflection_n"].value is None
     assert facts["massive.depth.useful_robots"].value is None
@@ -776,6 +784,91 @@ def test_a_scale_point_without_a_counted_run_leaves_the_cross_run_keys_null(
     assert facts["sweep.cls.inflection_between"].value is None
     assert facts["massive.cls.useful_robots"].value is None
     assert facts["sweep.cls.capacity_fps"].runs == 0
+
+
+CLS_INFLECTION_KEYS = tuple(
+    f"sweep.cls.{result}" for result in ("capacity_fps", "inflection_n", "inflection_between")
+)
+
+
+def write_scale_points(
+    results: Path,
+    sweep_measured: Mapping[str, tuple[float, float]],
+    massive_measured: tuple[float, float],
+) -> dict[str, str]:
+    """Write a classifier run per scale point, the massive one with a failed simulator check.
+
+    Each point is given as its utilization and peak command age; the run ids are returned by
+    scenario key.
+    """
+    run_ids = {
+        scenario_key: write_given(
+            results, plan_spec(scenario_key), scale_summary("cls", utilization, peak_ms)
+        ).name
+        for scenario_key, (utilization, peak_ms) in sweep_measured.items()
+    }
+    failed = {"checks": [{"name": "simulator_valid", "passed": False, "observed": None}]}
+    massive_summary = scale_summary("cls", *massive_measured) | failed
+    run_ids["massive"] = write_given(results, plan_spec("massive"), massive_summary).name
+    return run_ids
+
+
+def test_a_cross_run_fact_that_the_sweep_decides_carries_no_failed_check_of_the_massive_run(
+    tmp_path: Path,
+) -> None:
+    # The classifier saturates at 10 robots and passes its watchdog limit at 3, so neither
+    # value depends on the massive run.
+    run_ids = write_scale_points(
+        tmp_path,
+        {
+            "sweep_n1": (0.05, 40.0),
+            "sweep_n3": (0.15, 1200.0),
+            "sweep_n5": (0.25, 1300.0),
+            "sweep_n10": (1.5, 1400.0),
+        },
+        (2.5, 1500.0),
+    )
+
+    facts = built(tmp_path)
+
+    sweep_runs = tuple(
+        sorted(run_ids[key] for key in ("sweep_n1", "sweep_n3", "sweep_n5", "sweep_n10"))
+    )
+    assert {
+        key: (facts[key].run_ids, facts[key].failed_checks, facts[key].attempts)
+        for key in CLS_INFLECTION_KEYS
+    } == dict.fromkeys(CLS_INFLECTION_KEYS, (sweep_runs, {}, 4))
+    useful = facts["massive.cls.useful_robots"]
+    assert (useful.value, useful.run_ids, useful.failed_checks) == (
+        1,
+        tuple(sorted((run_ids["sweep_n1"], run_ids["sweep_n3"]))),
+        {},
+    )
+
+
+def test_a_cross_run_fact_that_the_massive_run_decides_carries_its_failed_checks(
+    tmp_path: Path,
+) -> None:
+    # The classifier saturates at 50 robots alone and stays within its watchdog limit at every
+    # point, so both values depend on the massive run.
+    run_ids = write_scale_points(
+        tmp_path,
+        {
+            "sweep_n1": (0.05, 40.0),
+            "sweep_n3": (0.15, 50.0),
+            "sweep_n5": (0.25, 60.0),
+            "sweep_n10": (0.6, 70.0),
+        },
+        (2.5, 80.0),
+    )
+
+    facts = built(tmp_path)
+
+    keys = (*CLS_INFLECTION_KEYS, "massive.cls.useful_robots")
+    behind = (tuple(sorted(run_ids.values())), {run_ids["massive"]: ("simulator_valid",)})
+    assert {key: (facts[key].run_ids, facts[key].failed_checks) for key in keys} == (
+        dict.fromkeys(keys, behind)
+    )
 
 
 def bins_summary(per_robot: Mapping[str, Sequence[float]], model: str = "depth") -> dict[str, Any]:
@@ -861,7 +954,7 @@ def test_every_summary_path_of_the_registry_is_a_number_the_summarizer_writes(
     read = {
         key: entry.path
         for key, entry in REGISTRY.items()
-        if entry.source in (Source.SUMMARY, Source.BREAKDOWN)
+        if entry.source in (Source.SUMMARY, Source.BREAKDOWN, Source.GAP_BOUND)
         and (entry.scenario_key, entry.topology) == (scenario_key, Topology.SINGLE)
     }
 

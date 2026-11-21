@@ -225,7 +225,7 @@ Close codes: 1000 normal, 1001 server shutdown, 1002 protocol error (a first mes
 - **Options.** (a) A FIFO request queue with a maximum batch size and a timeout, the usual dynamic batcher. (b) A FIFO queue per robot. (c) One newest-frame slot per robot, pulled by an idle worker, robots served least recently served first. (d) Credits: the robot sends only when the server grants a frame. (e) A server-advised frame rate, as an addition to (c).
 - **Decision.** (c). The batch cap comes from measurement (section 6.2). The scheduler never waits to fill a batch: a batch is whatever is eligible when the worker asks, up to the cap. (b), a bounded FIFO per robot that drops new frames when full, is kept as a switch for a control experiment; with one robot, as in that control, it behaves as (a) without the batch-fill timeout. (e) is a planned experiment (section 12) and is not built.
 - **Consequence.** Memory is bounded at one frame per robot. A robot that sends faster gains nothing. A joining robot is served at the next dispatch and then rotates like the others. A departed robot offers no frames, so its share is free before the server even detects the disconnect. (d) saves bandwidth but adds a round trip per grant, so the worker idles when the network has delay.
-- **At 50 robots.** Nothing changes structurally. The per-robot command interval grows linearly with N: 10686 ms at worst for depth, against a bound of 9599 ms.
+- **At 50 robots.** Nothing changes structurally. The per-robot command interval grows linearly with N: 10686 ms at worst for depth, against a bound of 10914 ms.
 
 ### 4.5 Gateway-to-worker IPC
 
@@ -522,7 +522,7 @@ In addition, the CPU budget of section 6.4 paces the depth worker at this load, 
 ### 8.2 What "not starved" means here
 
 - **Fairness.** On each model, the lowest per-robot command rate as a fraction of the mean is 0.996 for classification and 0.694 for depth. Jain index: 1.000 and 0.984.
-- **Bounded gap.** Each robot's longest command gap stays within the scheduler's bound (section 6.3): 10686 ms against 9599 ms for depth.
+- **Bounded gap.** Each robot's longest command gap stays within the scheduler's bound (section 6.3): 10686 ms against 10914 ms for depth.
 - **Usefulness.** Fair shares of too little are still too little. Watchdog coverage states this as a number: the fraction of time a robot holds an unexpired command is 0.994 for classification and 0.019 for depth at 50 robots. Within the watchdog limits the system serves 50 robots for classification and 1 for depth. That is the system's useful capacity per model, and the number a minimum-rate admission rule would be set from.
 
 ### 8.3 Memory budget
@@ -623,7 +623,7 @@ Time from the kill until the server closes the connection: 2.81 ms. Time until t
 | Predicted commands/s per robot | 6.04 | 0.113 |
 | Lowest over mean rate | 0.996 | 0.694 |
 | Jain index | 1.000 | 0.984 |
-| Longest command gap (ms), measured / bound | 310 / 307 | 10686 / 9599 |
+| Longest command gap (ms), measured / bound | 310 / 380 | 10686 / 10914 |
 | Freshness p50 / p95 / p99 / max (ms) | 46.4 / 62.6 / 72.0 / 102 | 118 / 138 / 146 / 191 |
 | Stale ratio | 0.000 | 0.006 |
 | Watchdog coverage, min / mean | 0.991 / 0.994 | 0.006 / 0.019 |

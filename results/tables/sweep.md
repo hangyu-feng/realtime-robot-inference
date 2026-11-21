@@ -44,4 +44,4 @@ Counted runs: 12.
 | `cls` | 294 | 9.81 | between 5 and 10 robots |
 | `depth` | 10.3 | 0.343 | below 1 robot |
 
-Counted runs: 15.
+Counted runs: 12.
