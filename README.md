@@ -6,6 +6,10 @@ A real-time inference service for a fleet of robots. Simulated robots stream 640
 
 ## At a glance
 
+The dashboard replaying a counted run of the late-joiner demo from `results/`, one recorded scrape a second (Dashboard, below).
+
+![The dashboard replaying the late-joiner run: tiles for robots, memory, loop lag and workers above per-robot and per-model charts](docs/dashboard.gif)
+
 Freshness of each model's commands over time in the steady demo, under latest-wins and under the FIFO control the design rejected: under FIFO, depth's freshness grows for the whole run (Tried and rejected, in DESIGN.md).
 
 ![Freshness against time under latest wins and under the FIFO control, per model](results/plots/fifo_vs_latest.png)

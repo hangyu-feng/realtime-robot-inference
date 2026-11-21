@@ -116,7 +116,9 @@ h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
 .key { display: inline-flex; align-items: center; gap: 4px; }
 .key svg { flex: none; }
 .plot { flex: 1; min-height: 0; position: relative; }
-.plot svg { position: absolute; inset: 0; display: block; }
+/* The svg is replaced on every redraw. Browsers differ on leave events after the node under the
+   pointer is removed, so the plot, which stays, takes the pointer and its pointerleave fires. */
+.plot svg { position: absolute; inset: 0; display: block; pointer-events: none; }
 .tooltip {
   position: absolute;
   pointer-events: none;
